@@ -64,20 +64,24 @@ class StarryNet():
         self.ISL_hub = 'ISL_hub'
         self.container_id_list = []
         self.n_container = 0
-        # Get ssh handler.
-        self.remote_ssh, self.transport = sn_init_remote_machine(
-            sn_args.remote_machine_IP, sn_args.remote_machine_username,
-            sn_args.remote_machine_password)
-        if self.remote_ssh is None:
-            print('Remote SSH login failure.')
-            return
-        if self.transport is None:
-            print('Remote transport login failure.')
-            return
-        self.remote_ftp = sn_init_remote_ftp(self.transport)
-        if self.remote_ftp is None:
-            print('Remote ftp login failure.')
-            return
+        if sn_args.local_mode:
+            self.remote_ssh = None
+            self.transport = None
+            self.remote_ftp = LocalSFTP()
+        else:
+            self.remote_ssh, self.transport = sn_init_remote_machine(
+                sn_args.remote_machine_IP, sn_args.remote_machine_username,
+                sn_args.remote_machine_password)
+            if self.remote_ssh is None:
+                print('Remote SSH login failure.')
+                return
+            if self.transport is None:
+                print('Remote transport login failure.')
+                return
+            self.remote_ftp = sn_init_remote_ftp(self.transport)
+            if self.remote_ftp is None:
+                print('Remote ftp login failure.')
+                return
         self.utility_checking_time = []
         self.ping_src = []
         self.ping_des = []
