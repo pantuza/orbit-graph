@@ -265,16 +265,14 @@ def sn_get_param(file_):
 
 
 def sn_get_container_info():
-    #  Read all container information in all_container_info
-    with os.popen("docker ps") as f:
-        all_container_info = f.readlines()
-        n_container = len(all_container_info) - 1
-
-    container_id_list = []
-    for container_idx in range(1, n_container + 1):
-        container_id_list.append(all_container_info[container_idx].split()[0])
-
-    return container_id_list
+    with os.popen(
+            "docker ps --filter name=ovs_container --format '{{.Names}}'"
+    ) as f:
+        lines = f.readlines()
+    names = sorted(
+        [l.strip() for l in lines if l.strip()],
+        key=lambda n: int(n.rsplit('_', 1)[-1]))
+    return names
 
 
 def sn_establish_GSL(container_id_list, matrix, GS_num, constellation_size, bw,
@@ -468,14 +466,14 @@ def sn_del_network(network_name):
 
 
 def sn_stop_emulation():
-    os.system("docker service rm constellation-test")
-    with os.popen("docker rm -f $(docker ps -a -q)") as f:
-        f.readlines()
+    os.system(
+        "docker rm -f $(docker ps -aq --filter name=ovs_container) 2>/dev/null; true"
+    )
     with os.popen("docker network ls") as f:
         all_br_info = f.readlines()
         del_threads = []
         for line in all_br_info:
-            if "La" in line or "Le" or "GS" in line:
+            if "La" in line or "Le" in line or "GS" in line:
                 network_name = line.split()[1]
                 del_thread = threading.Thread(target=sn_del_network,
                                               args=(network_name, ))
