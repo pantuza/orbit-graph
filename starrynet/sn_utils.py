@@ -1,9 +1,10 @@
 import os
+import shutil
+import subprocess
 import threading
 import json
 import copy
 import argparse
-import os
 from time import sleep
 import time
 import numpy
@@ -76,6 +77,7 @@ def sn_load_file(path, GS_lat_long):
     data['remote_machine_IP'] = table["remote_machine_IP"]
     data['remote_machine_username'] = table["remote_machine_username"]
     data['remote_machine_password'] = table["remote_machine_password"]
+    data['local_mode'] = table.get("local_mode", 0)
 
     parser = argparse.ArgumentParser(description='manual to this script')
     parser.add_argument('--cons_name', type=str, default=data['cons_name'])
@@ -130,6 +132,7 @@ def sn_load_file(path, GS_lat_long):
     parser.add_argument('--remote_machine_password',
                         type=str,
                         default=data['remote_machine_password'])
+    parser.add_argument('--local_mode', type=int, default=data['local_mode'])
 
     parser.add_argument('--path',
                         '-p',
@@ -156,6 +159,23 @@ def sn_get_param(file_):
     return ADJ
 
 
+def sn_local_cmd(cmd):
+    result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+    lines = result.stdout.splitlines(keepends=True)
+    return lines
+
+
+class LocalSFTP:
+    """Drop-in replacement for paramiko.SFTPClient in local mode."""
+
+    def put(self, local_path, remote_path):
+        abs_src = os.path.abspath(local_path)
+        abs_dst = os.path.abspath(remote_path)
+        if abs_src != abs_dst:
+            os.makedirs(os.path.dirname(abs_dst), exist_ok=True)
+            shutil.copy(abs_src, abs_dst)
+
+
 def sn_init_remote_machine(host, username, password):
     # transport = paramiko.Transport((host, 22))
     # transport.connect(username=username, password=password)
@@ -179,6 +199,8 @@ def sn_init_remote_ftp(transport):
 
 
 def sn_remote_cmd(remote_ssh, cmd):
+    if remote_ssh is None:
+        return sn_local_cmd(cmd)
     stdin, stdout, stderr = remote_ssh.exec_command(cmd, get_pty=True)
     lines = stdout.readlines()
     return lines
@@ -204,8 +226,9 @@ class sn_init_directory_thread(threading.Thread):
                       self.file_path + "/delay")
             os.system("mkdir " + self.configuration_file_path + "/" +
                       self.file_path + "/mid_files")
-        sn_remote_cmd(self.remote_ssh, "mkdir ~/" + self.file_path)
-        sn_remote_cmd(self.remote_ssh, "mkdir ~/" + self.file_path + "/delay")
+        if self.remote_ssh is not None:
+            sn_remote_cmd(self.remote_ssh, "mkdir ~/" + self.file_path)
+            sn_remote_cmd(self.remote_ssh, "mkdir ~/" + self.file_path + "/delay")
 
 
 # A thread designed for initializing constellation nodes.
@@ -233,13 +256,20 @@ class sn_Node_Init_Thread(threading.Thread):
 
 
 def sn_get_container_info(remote_machine_ssh):
+    if remote_machine_ssh is None:
+        # Local mode: return sorted container names to ensure deterministic ordering.
+        lines = sn_local_cmd(
+            "docker ps --filter name=ovs_container --format '{{.Names}}'")
+        names = sorted(
+            [l.strip() for l in lines if l.strip()],
+            key=lambda n: int(n.rsplit('_', 1)[-1]))
+        return names
     #  Read all container information in all_container_info
     all_container_info = sn_remote_cmd(remote_machine_ssh, "docker ps")
     n_container = len(all_container_info) - 1
     container_id_list = []
     for container_idx in range(1, n_container + 1):
         container_id_list.append(all_container_info[container_idx].split()[0])
-
     return container_id_list
 
 
@@ -255,19 +285,33 @@ def sn_delete_remote_network_bridge(remote_ssh):
 def sn_reset_docker_env(remote_ssh, docker_service_name, node_size):
     print("Reset docker environment for constellation emulation ...")
     print("Remove legacy containers.")
-    print(sn_remote_cmd(remote_ssh,
-                        "docker service rm " + docker_service_name))
-    print(sn_remote_cmd(remote_ssh, "docker rm -f $(docker ps -a -q)"))
-    print("Remove legacy emulated ISLs.")
-    sn_delete_remote_network_bridge(remote_ssh)
-    print("Creating new containers...")
-    sn_remote_cmd(
-        remote_ssh, "docker service create --replicas " + str(node_size) +
-        " --name " + str(docker_service_name) +
-        " --cap-add ALL lwsen/starlab_node:1.0 ping www.baidu.com")
+    if remote_ssh is None:
+        sn_local_cmd(
+            "docker rm -f $(docker ps -aq --filter name=ovs_container) 2>/dev/null; true"
+        )
+        print("Remove legacy emulated ISLs.")
+        sn_delete_remote_network_bridge(remote_ssh)
+        print("Creating new containers...")
+        for i in range(1, node_size + 1):
+            sn_local_cmd(
+                "docker run -d --name ovs_container_" + str(i) +
+                " --cap-add ALL --privileged"
+                " lwsen/starlab_node:1.0 ping -i 3600 127.0.0.1")
+    else:
+        print(sn_remote_cmd(remote_ssh, "docker service rm " + docker_service_name))
+        print(sn_remote_cmd(remote_ssh, "docker rm -f $(docker ps -a -q)"))
+        print("Remove legacy emulated ISLs.")
+        sn_delete_remote_network_bridge(remote_ssh)
+        print("Creating new containers...")
+        sn_remote_cmd(
+            remote_ssh, "docker service create --replicas " + str(node_size) +
+            " --name " + str(docker_service_name) +
+            " --cap-add ALL lwsen/starlab_node:1.0 ping www.baidu.com")
 
 
 def sn_rename_all_container(remote_ssh, container_id_list, new_idx):
+    if remote_ssh is None:
+        return  # already named ovs_container_N during docker run
     print("Rename all containers ...")
     new_idx = 1
     for container_id in container_id_list:
@@ -626,7 +670,10 @@ class sn_Emulation_Start_Thread(threading.Thread):
 
 
 def sn_check_utility(time_index, remote_ssh, file_path):
-    result = sn_remote_cmd(remote_ssh, "vmstat")
+    if remote_ssh is None:
+        result = sn_local_cmd("vm_stat")
+    else:
+        result = sn_remote_cmd(remote_ssh, "vmstat")
     f = open(file_path + "/utility-info" + "_" + str(time_index) + ".txt", "w")
     f.writelines(result)
     f.close()
@@ -898,8 +945,14 @@ class sn_Emulation_Stop_Thread(threading.Thread):
 
     def run(self):
         print("Deleting all native bridges and containers...")
-        self.remote_ftp.put(
-            os.path.join(os.getcwd(), "starrynet/sn_orchestrater.py"),
-            self.file_path + "/sn_orchestrater.py")
-        sn_remote_cmd(self.remote_ssh,
-                      "python3 " + self.file_path + "/sn_orchestrater.py")
+        if self.remote_ssh is None:
+            sn_local_cmd(
+                "docker rm -f $(docker ps -aq --filter name=ovs_container) 2>/dev/null; true"
+            )
+            sn_delete_remote_network_bridge(None)
+        else:
+            self.remote_ftp.put(
+                os.path.join(os.getcwd(), "starrynet/sn_orchestrater.py"),
+                self.file_path + "/sn_orchestrater.py")
+            sn_remote_cmd(self.remote_ssh,
+                          "python3 " + self.file_path + "/sn_orchestrater.py")
