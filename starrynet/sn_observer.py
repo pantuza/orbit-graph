@@ -444,21 +444,23 @@ class Observer():
             osstr = "rm -f " + self.configuration_file_path+"/"+self.file_path+"/conf/bird-" + \
                 str(self.orbit_number*self.sat_number) + "-" + str(len(self.GS_lat_long)) + "/*"
             os.system(osstr)
-            sn_remote_cmd(remote_ssh, "mkdir ~/" + self.file_path + "/conf")
-            sn_remote_cmd(
-                remote_ssh, "mkdir ~/" + self.file_path + "/conf/bird-" +
-                str(self.orbit_number * self.sat_number) + "-" +
-                str(len(self.GS_lat_long)))
+            if remote_ssh is not None:
+                sn_remote_cmd(remote_ssh, "mkdir ~/" + self.file_path + "/conf")
+                sn_remote_cmd(
+                    remote_ssh, "mkdir ~/" + self.file_path + "/conf/bird-" +
+                    str(self.orbit_number * self.sat_number) + "-" +
+                    str(len(self.GS_lat_long)))
         else:
             os.makedirs(self.configuration_file_path + "/" + self.file_path +
                         "/conf/bird-" +
                         str(self.orbit_number * self.sat_number) + "-" +
                         str(len(self.GS_lat_long)))
-            sn_remote_cmd(remote_ssh, "mkdir ~/" + self.file_path + "/conf")
-            sn_remote_cmd(
-                remote_ssh, "mkdir ~/" + self.file_path + "/conf/bird-" +
-                str(self.orbit_number * self.sat_number) + "-" +
-                str(len(self.GS_lat_long)))
+            if remote_ssh is not None:
+                sn_remote_cmd(remote_ssh, "mkdir ~/" + self.file_path + "/conf")
+                sn_remote_cmd(
+                    remote_ssh, "mkdir ~/" + self.file_path + "/conf/bird-" +
+                    str(self.orbit_number * self.sat_number) + "-" +
+                    str(len(self.GS_lat_long)))
         path = self.configuration_file_path + "/" + self.file_path + "/delay/1.txt"
         matrix = sn_get_param(path)
         num_backbone = self.orbit_number * self.sat_number + len(
