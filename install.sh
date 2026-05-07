@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# installation script for Ubuntu, Debian and CentOS
+# installation script for Ubuntu, Debian, CentOS and macOS
 # author: Yangtao Deng
 
 DIST=Unknown
@@ -10,6 +10,9 @@ ARCH=`uname -m`
 if [ "$ARCH" = "x86_64" ]; then ARCH="amd64"; fi
 if [ "$ARCH" = "i686" ]; then ARCH="i386"; fi
 
+if [ "$(uname)" = "Darwin" ]; then
+    DIST="Darwin"
+fi
 test -e /etc/debian_version && DIST="Debian"
 grep Ubuntu /etc/lsb-release &> /dev/null && DIST="Ubuntu"
 if [ "$DIST" = "Ubuntu" ] || [ "$DIST" = "Debian" ]; then
@@ -34,6 +37,23 @@ if [ "$DIST" = "Fedora" -o "$DIST" = "RedHatEnterpriseServer" ]  || [ "$DIST" = 
     if ! which lsb_release &> /dev/null; then
         $install redhat-lsb-core
     fi
+fi
+
+if [ "$DIST" = "Darwin" ]; then
+    echo "Installing dependencies for macOS via Homebrew"
+    if ! which brew &> /dev/null; then
+        echo "Homebrew not found. Install it from https://brew.sh and re-run this script."
+        exit 1
+    fi
+    brew install python3
+    python3 -m pip install --upgrade pip
+    python3 -m pip install -r tools/requirements.txt
+    python3 setup.py install
+    echo ""
+    echo "NOTE: Docker Desktop must be installed and running on macOS."
+    echo "Download from https://www.docker.com/products/docker-desktop/"
+    echo "local_mode is enabled in config.json — no remote machine needed."
+    exit 0
 fi
 
 echo "Installing dependencies"
