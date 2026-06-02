@@ -47,8 +47,9 @@ def get_down_satellite(current_sat_id, current_orbit_id, sat_num):
 
 
 def sn_load_file(path, GS_lat_long):
-    f = open("./config.json", "r", encoding='utf8')
-    table = json.load(f)
+    config_path = os.path.abspath(path)
+    with open(config_path, "r", encoding="utf8") as f:
+        table = json.load(f)
     data = {}
     data['cons_name'] = table["Name"]
     data['altitude'] = table["Altitude (km)"]
@@ -145,7 +146,9 @@ def sn_load_file(path, GS_lat_long):
                         type=str,
                         default="50.110924/8.682127/46.635700/14.311817")
 
-    sn_args = parser.parse_args()
+    # Allow host scripts (e.g. experiments/compare_single_run.py) to add their
+    # own CLI flags without conflicting with StarryNet's optional overrides.
+    sn_args, _unknown = parser.parse_known_args()
     return sn_args
 
 
@@ -403,8 +406,11 @@ class sn_Emulation_Start_Thread(threading.Thread):
                  ping_src, ping_des, ping_time, sr_src, sr_des, sr_target,
                  sr_time, damage_ratio, damage_time, damage_list,
                  recovery_time, route_src, route_time, duration,
-                 utility_checking_time, perf_src, perf_des, perf_time):
+                 utility_checking_time, perf_src, perf_des, perf_time,
+                 sdn_sn=None, ospf_sn=None):
         threading.Thread.__init__(self)
+        self.sdn_sn = sdn_sn
+        self.ospf_sn = ospf_sn
         self.remote_ssh = remote_ssh
         self.remote_ftp = remote_ftp
         self.sat_loss = sat_loss
@@ -436,6 +442,42 @@ class sn_Emulation_Start_Thread(threading.Thread):
         if self.container_id_list == []:
             self.container_id_list = sn_get_container_info(self.remote_ssh)
 
+    def _sdn_delay_update(self, timeptr):
+        if self.sdn_sn is None:
+            return
+        from starrynet.sn_sdn_adapter import sdn_after_delay_update
+        sdn_after_delay_update(self.sdn_sn, timeptr)
+
+    def _sdn_damage_recovery(self, timeptr):
+        if self.sdn_sn is None:
+            return
+        from starrynet.sn_sdn_adapter import sdn_after_damage_or_recovery
+        sdn_after_damage_or_recovery(self.sdn_sn, timeptr)
+
+    def _sdn_topology_change(self, time_index):
+        if self.sdn_sn is None:
+            return
+        from starrynet.sn_sdn_adapter import sdn_after_topology_change
+        sdn_after_topology_change(self.sdn_sn, int(time_index))
+
+    def _ospf_delay_update(self, timeptr):
+        if self.ospf_sn is None:
+            return
+        from starrynet.sn_ospf_adapter import ospf_after_delay_update
+        ospf_after_delay_update(self.ospf_sn, timeptr)
+
+    def _ospf_damage_recovery(self, timeptr):
+        if self.ospf_sn is None:
+            return
+        from starrynet.sn_ospf_adapter import ospf_after_damage_or_recovery
+        ospf_after_damage_or_recovery(self.ospf_sn, timeptr)
+
+    def _ospf_topology_change(self, time_index):
+        if self.ospf_sn is None:
+            return
+        from starrynet.sn_ospf_adapter import ospf_after_topology_change
+        ospf_after_topology_change(self.ospf_sn, int(time_index))
+
     def run(self):
         ping_threads = []
         perf_threads = []
@@ -462,17 +504,23 @@ class sn_Emulation_Start_Thread(threading.Thread):
                                         self.configuration_file_path, timeptr,
                                         self.constellation_size,
                                         self.remote_ssh, self.remote_ftp)
+                        self._sdn_delay_update(timeptr)
+                        self._ospf_delay_update(timeptr)
                     if timeptr in self.damage_time:
                         sn_damage(
                             self.damage_ratio[self.damage_time.index(timeptr)],
                             self.damage_list, self.constellation_size,
                             self.remote_ssh, self.remote_ftp, self.file_path,
                             self.configuration_file_path)
+                        self._sdn_damage_recovery(timeptr)
+                        self._ospf_damage_recovery(timeptr)
                     if timeptr in self.recovery_time:
                         sn_recover(self.damage_list, self.sat_loss,
                                    self.remote_ssh, self.remote_ftp,
                                    self.file_path,
                                    self.configuration_file_path)
+                        self._sdn_damage_recovery(timeptr)
+                        self._ospf_damage_recovery(timeptr)
                     if timeptr in self.sr_time:
                         index = [
                             i for i, val in enumerate(self.sr_time)
@@ -584,6 +632,8 @@ class sn_Emulation_Start_Thread(threading.Thread):
                     words = line.split()
                     if len(words) == 0:
                         return
+                self._sdn_topology_change(current_time)
+                self._ospf_topology_change(current_time)
                 if timeptr in self.utility_checking_time:
                     sn_check_utility(
                         timeptr, self.remote_ssh,
@@ -594,16 +644,22 @@ class sn_Emulation_Start_Thread(threading.Thread):
                                     self.configuration_file_path, timeptr,
                                     self.constellation_size, self.remote_ssh,
                                     self.remote_ftp)
+                    self._sdn_delay_update(timeptr)
+                    self._ospf_delay_update(timeptr)
                 if timeptr in self.damage_time:
                     sn_damage(
                         self.damage_ratio[self.damage_time.index(timeptr)],
                         self.damage_list, self.constellation_size,
                         self.remote_ssh, self.remote_ftp, self.file_path,
                         self.configuration_file_path)
+                    self._sdn_damage_recovery(timeptr)
+                    self._ospf_damage_recovery(timeptr)
                 if timeptr in self.recovery_time:
                     sn_recover(self.damage_list, self.sat_loss,
                                self.remote_ssh, self.remote_ftp,
                                self.file_path, self.configuration_file_path)
+                    self._sdn_damage_recovery(timeptr)
+                    self._ospf_damage_recovery(timeptr)
                 if timeptr in self.sr_time:
                     index = [
                         i for i, val in enumerate(self.sr_time)
@@ -759,24 +815,36 @@ def sn_sr(src, des, target, container_id_list, remote_ssh):
           (src, target) + target_IP[0])
 
 
+def _resolve_node_ipv4(des, constellation_size, container_id_list, remote_ssh):
+    """Resolve destination IPv4 (works with eth* or B*-eth* interface names)."""
+    cid = str(container_id_list[des - 1])
+    if des > constellation_size:
+        target = f"9.{des}.{des}.10"
+        lines = sn_remote_cmd(
+            remote_ssh,
+            "docker exec -i " + cid +
+            " ip -4 -o addr show scope global | awk '{print $4}'",
+        )
+        for line in lines:
+            ip = line.strip().split("/")[0]
+            if ip == target:
+                return target
+        return target
+    lines = sn_remote_cmd(
+        remote_ssh,
+        "docker exec -i " + cid +
+        " ip -4 -o addr show scope global | awk '{print $4}' | grep -v '^192\\.168\\.' | head -1",
+    )
+    return lines[0].strip().split("/")[0]
+
+
 def sn_ping(src, des, time_index, constellation_size, container_id_list,
             file_path, configuration_file_path, remote_ssh):
-    if des <= constellation_size:
-        ifconfig_output = sn_remote_cmd(
-            remote_ssh, "docker exec -it " + str(container_id_list[des - 1]) +
-            " ifconfig | sed 's/[ \t].*//;/^\(eth0\|\)\(lo\|\)$/d'")
-        des_IP = sn_remote_cmd(
-            remote_ssh, "docker exec -it " + str(container_id_list[des - 1]) +
-            " ifconfig " + ifconfig_output[0][:-1] +
-            "|awk -F '[ :]+' 'NR==2{print $4}'")
-    else:
-        des_IP = sn_remote_cmd(
-            remote_ssh, "docker exec -it " + str(container_id_list[des - 1]) +
-            " ifconfig B" + str(des) +
-            "-default |awk -F '[ :]+' 'NR==2{print $4}'")
+    dest_ip = _resolve_node_ipv4(des, constellation_size, container_id_list,
+                                 remote_ssh)
     ping_result = sn_remote_cmd(
         remote_ssh, "docker exec -i " + str(container_id_list[src - 1]) +
-        " ping " + str(des_IP[0][:-1]) + " -c 4 -i 0.01 ")
+        " ping " + dest_ip + " -c 4 -i 0.01 ")
     f = open(
         configuration_file_path + "/" + file_path + "/ping-" + str(src) + "-" +
         str(des) + "_" + str(time_index) + ".txt", "w")
@@ -786,19 +854,8 @@ def sn_ping(src, des, time_index, constellation_size, container_id_list,
 
 def sn_perf(src, des, time_index, constellation_size, container_id_list,
             file_path, configuration_file_path, remote_ssh):
-    if des <= constellation_size:
-        ifconfig_output = sn_remote_cmd(
-            remote_ssh, "docker exec -it " + str(container_id_list[des - 1]) +
-            " ifconfig | sed 's/[ \t].*//;/^\(eth0\|\)\(lo\|\)$/d'")
-        des_IP = sn_remote_cmd(
-            remote_ssh, "docker exec -it " + str(container_id_list[des - 1]) +
-            " ifconfig " + ifconfig_output[0][:-1] +
-            "|awk -F '[ :]+' 'NR==2{print $4}'")
-    else:
-        des_IP = sn_remote_cmd(
-            remote_ssh, "docker exec -it " + str(container_id_list[des - 1]) +
-            " ifconfig B" + str(des) +
-            "-default |awk -F '[ :]+' 'NR==2{print $4}'")
+    dest_ip = _resolve_node_ipv4(des, constellation_size, container_id_list,
+                                 remote_ssh)
 
     sn_remote_cmd(
         remote_ssh,
@@ -806,7 +863,7 @@ def sn_perf(src, des, time_index, constellation_size, container_id_list,
     print("iperf server success")
     perf_result = sn_remote_cmd(
         remote_ssh, "docker exec -i " + str(container_id_list[src - 1]) +
-        " iperf3 -c " + str(des_IP[0][:-1]) + " -t 5 ")
+        " iperf3 -c " + dest_ip + " -t 5 ")
     print("iperf client success")
     f = open(
         configuration_file_path + "/" + file_path + "/perf-" + str(src) + "-" +
@@ -876,7 +933,7 @@ def sn_establish_new_GSL(container_id_list, matrix, constellation_size, bw,
         " tc qdisc add dev B" + str(i - 1 + 1) + "-eth" + str(j) +
         " root netem rate " + str(bw) + "Gbps")
     print('[Add current node:]' + 'docker network connect ' + GSL_name + " " +
-          str(container_id_list[i - 1]) + " --ip 10." + str(address_16_23) +
+          str(container_id_list[i - 1]) + " --ip 9." + str(address_16_23) +
           "." + str(address_8_15) + ".50")
     sn_remote_cmd(
         remote_ssh, 'docker network connect ' + GSL_name + " " +
@@ -911,7 +968,7 @@ def sn_establish_new_GSL(container_id_list, matrix, constellation_size, bw,
         " tc qdisc add dev B" + str(j) + "-eth" + str(i - 1 + 1) +
         " root netem rate " + str(bw) + "Gbps")
     print('[Add right node:]' + 'docker network connect ' + GSL_name + " " +
-          str(container_id_list[j - 1]) + " --ip 10." + str(address_16_23) +
+          str(container_id_list[j - 1]) + " --ip 9." + str(address_16_23) +
           "." + str(address_8_15) + ".60")
 
 
