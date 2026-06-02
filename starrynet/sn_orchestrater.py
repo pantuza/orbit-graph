@@ -53,7 +53,7 @@ def sn_ISL_establish(current_sat_id, current_orbit_id, container_id_list,
     delay = matrix[current_orbit_id * sat_num +
                    current_sat_id][down_orbit_id * sat_num + down_sat_id]
     with os.popen(
-            "docker exec -it " +
+            "docker exec -i " +
             str(container_id_list[current_orbit_id * sat_num +
                                   current_sat_id]) +
             " ip addr | grep -B 2 10." + str(address_16_23) + "." +
@@ -93,7 +93,7 @@ def sn_ISL_establish(current_sat_id, current_orbit_id, container_id_list,
               " --ip 10." + str(address_16_23) + "." + str(address_8_15) +
               ".10")
     with os.popen(
-            "docker exec -it " +
+            "docker exec -i " +
             str(container_id_list[down_orbit_id * sat_num + down_sat_id]) +
             " ip addr | grep -B 2 10." + str(address_16_23) + "." +
             str(address_8_15) +
@@ -157,7 +157,7 @@ def sn_ISL_establish(current_sat_id, current_orbit_id, container_id_list,
     delay = matrix[current_orbit_id * sat_num +
                    current_sat_id][right_orbit_id * sat_num + right_sat_id]
     with os.popen(
-            "docker exec -it " +
+            "docker exec -i " +
             str(container_id_list[current_orbit_id * sat_num +
                                   current_sat_id]) +
             " ip addr | grep -B 2 10." + str(address_16_23) + "." +
@@ -198,7 +198,7 @@ def sn_ISL_establish(current_sat_id, current_orbit_id, container_id_list,
               ".20")
 
     with os.popen(
-            "docker exec -it " +
+            "docker exec -i " +
             str(container_id_list[right_orbit_id * sat_num + right_sat_id]) +
             " ip addr | grep -B 2 10." + str(address_16_23) + "." +
             str(address_8_15) +
@@ -299,7 +299,7 @@ def sn_establish_GSL(container_id_list, matrix, GS_num, constellation_size, bw,
                       str(container_id_list[i - 1]) + " --ip 9." +
                       str(address_16_23) + "." + str(address_8_15) + ".50")
             with os.popen(
-                    "docker exec -it " + str(container_id_list[i - 1]) +
+                    "docker exec -i " + str(container_id_list[i - 1]) +
                     " ip addr | grep -B 2 9." + str(address_16_23) + "." +
                     str(address_8_15) +
                     ".50 | head -n 1 | awk -F: '{ print $2 }' | tr -d [:blank:]"
@@ -325,7 +325,7 @@ def sn_establish_GSL(container_id_list, matrix, GS_num, constellation_size, bw,
                       str(container_id_list[j - 1]) + " --ip 9." +
                       str(address_16_23) + "." + str(address_8_15) + ".60")
             with os.popen(
-                    "docker exec -it " + str(container_id_list[j - 1]) +
+                    "docker exec -i " + str(container_id_list[j - 1]) +
                     " ip addr | grep -B 2 9." + str(address_16_23) + "." +
                     str(address_8_15) +
                     ".60 | head -n 1 | awk -F: '{ print $2 }' | tr -d [:blank:]"
@@ -359,7 +359,7 @@ def sn_establish_GSL(container_id_list, matrix, GS_num, constellation_size, bw,
                   str(container_id_list[j - 1]) + " --ip 9." + str(j) + "." +
                   str(j) + ".10")
         with os.popen(
-                "docker exec -it " + str(container_id_list[j - 1]) +
+                "docker exec -i " + str(container_id_list[j - 1]) +
                 " ip addr | grep -B 2 9." + str(j) + "." + str(j) +
                 ".10 | head -n 1 | awk -F: '{ print $2 }' | tr -d [:blank:]"
         ) as f:
@@ -383,7 +383,7 @@ def sn_copy_run_conf(container_idx, Path, current, total):
               str(container_idx) + ":/B" + str(current + 1) + ".conf")
     print("[" + str(current + 1) + "/" + str(total) + "]" +
           " docker cp bird.conf " + str(container_idx) + ":/bird.conf")
-    os.system("docker exec -it " + str(container_idx) + " bird -c B" +
+    os.system("docker exec -i " + str(container_idx) + " bird -c B" +
               str(current + 1) + ".conf")
     print("[" + str(current + 1) + "/" + str(total) +
           "] Bird routing process for container: " + str(container_idx) +
@@ -415,7 +415,7 @@ def sn_copy_run_conf_to_each_container(container_id_list, sat_node_number,
 
 def sn_damage_link(sat_index, container_id_list):
     with os.popen(
-            "docker exec -it " + str(container_id_list[sat_index]) +
+            "docker exec -i " + str(container_id_list[sat_index]) +
             " ifconfig | sed 's/[ \t].*//;/^\(eth0\|\)\(lo\|\)$/d'") as f:
         ifconfig_output = f.readlines()
         for intreface in range(0, len(ifconfig_output), 2):
@@ -447,7 +447,7 @@ def sn_recover_link(
     sat_loss,
 ):
     with os.popen(
-            "docker exec -it " + str(container_id_list[damaged_satellite]) +
+            "docker exec -i " + str(container_id_list[damaged_satellite]) +
             " ifconfig | sed 's/[ \t].*//;/^\(eth0\|\)\(lo\|\)$/d'") as f:
         ifconfig_output = f.readlines()
         for i in range(0, len(ifconfig_output), 2):
