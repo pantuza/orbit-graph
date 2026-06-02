@@ -6,6 +6,8 @@ author: Zeqi Lai (zeqilai@tsinghua.edu.cn) and Yangtao Deng (dengyt21@mails.tsin
 """
 from starrynet.sn_observer import *
 from starrynet.sn_utils import *
+from starrynet.sn_sdn_adapter import is_sdn_mode, run_sdn_initial_routes
+from starrynet.sn_ospf_adapter import is_ospf_mode
 
 
 class StarryNet():
@@ -14,7 +16,8 @@ class StarryNet():
                  configuration_file_path,
                  GS_lat_long,
                  hello_interval=10,
-                 AS=[]):
+                 AS=[],
+                 artifact_suffix=None):
         # Initialize constellation information.
         sn_args = sn_load_file(configuration_file_path, GS_lat_long)
         self.name = sn_args.cons_name
@@ -32,6 +35,7 @@ class StarryNet():
         self.duration = sn_args.duration
         self.inter_routing = sn_args.inter_routing
         self.intra_routing = sn_args.intra_routing
+        print(f"Intra-AS routing mode: {self.intra_routing}")
         self.cycle = sn_args.cycle
         self.time_slot = sn_args.time_slot
         self.sat_bandwidth = sn_args.sat_bandwidth
@@ -52,6 +56,8 @@ class StarryNet():
                 sn_args.satellite_altitude) + '-' + str(
                     sn_args.inclination
                 ) + '-' + sn_args.link_style + '-' + sn_args.link_policy
+        if artifact_suffix:
+            self.file_path += f"-{artifact_suffix}"
         self.observer = Observer(self.file_path, self.configuration_file_path,
                                  self.inclination, self.satellite_altitude,
                                  self.orbit_number, self.sat_number,
@@ -108,8 +114,11 @@ class StarryNet():
         sn_thread.join()
         # Initiate a necessary delay and position data for emulation
         self.observer.calculate_delay()
-        # Generate configuration file for routing
-        self.observer.generate_conf(self.remote_ssh, self.remote_ftp)
+        self.sdn_controller = None
+        self.ospf_metrics = None
+        # Generate BIRD/OSPF configs unless using centralized SDN routing
+        if not is_sdn_mode(self.intra_routing):
+            self.observer.generate_conf(self.remote_ssh, self.remote_ftp)
 
     def create_nodes(self):
         # Initialize each machine in multiple threads.
@@ -135,6 +144,10 @@ class StarryNet():
         print("Link initialization done.")
 
     def run_routing_deamon(self):
+        if is_sdn_mode(self.intra_routing):
+            run_sdn_initial_routes(self)
+            print("SDN control plane: initial routes installed (no BIRD/OSPF).")
+            return
         routing_thread = sn_Routing_Init_Thread(
             self.remote_ssh, self.remote_ftp, self.orbit_number,
             self.sat_number, self.constellation_size, self.fac_num,
@@ -222,6 +235,8 @@ class StarryNet():
 
     def start_emulation(self):
         # Start emulation in a new thread.
+        sdn_sn = self if is_sdn_mode(self.intra_routing) else None
+        ospf_sn = self if is_ospf_mode(self.intra_routing) else None
         sn_thread = sn_Emulation_Start_Thread(
             self.remote_ssh, self.remote_ftp, self.sat_loss,
             self.sat_ground_bandwidth, self.sat_ground_loss,
@@ -232,7 +247,8 @@ class StarryNet():
             self.sr_time, self.damage_ratio, self.damage_time,
             self.damage_list, self.recovery_time, self.route_src,
             self.route_time, self.duration, self.utility_checking_time,
-            self.perf_src, self.perf_des, self.perf_time)
+            self.perf_src, self.perf_des, self.perf_time,
+            sdn_sn=sdn_sn, ospf_sn=ospf_sn)
         sn_thread.start()
         sn_thread.join()
 
