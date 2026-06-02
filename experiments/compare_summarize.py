@@ -37,6 +37,14 @@ def _parse_ping(path: str) -> dict:
             m = re.search(r"/([\d.]+)/", line)
             if m:
                 avg_ms = float(m.group(1))
+    # No summary line: either the route was missing ("Network is unreachable",
+    # written to a now-captured stderr) or the file is empty because nothing
+    # came back. Both mean total failure for this probe -> record 100% loss so
+    # outages show up as data, not as a misleading "NA".
+    if loss is None and (
+        re.search(r"unreachable", text, re.IGNORECASE) or not text.strip()
+    ):
+        loss = 100
     return {"loss": loss, "avg_ms": avg_ms}
 
 
