@@ -853,9 +853,14 @@ def sn_ping(src, des, time_index, constellation_size, container_id_list,
             file_path, configuration_file_path, remote_ssh):
     dest_ip = _resolve_node_ipv4(des, constellation_size, container_id_list,
                                  remote_ssh)
+    # 2>&1: when the source has no route the kernel makes `ping` print
+    # "connect: Network is unreachable" on stderr and exit with no summary.
+    # sn_local_cmd only keeps stdout, so without this the file would be empty
+    # and a real outage (e.g. OSPF mid-reconvergence) would look like missing
+    # data instead of 100% loss. Merging stderr preserves that evidence.
     ping_result = sn_remote_cmd(
         remote_ssh, "docker exec -i " + str(container_id_list[src - 1]) +
-        " ping " + dest_ip + " -c 4 -i 0.01 ")
+        " ping " + dest_ip + " -c 4 -i 0.01 2>&1")
     f = open(
         configuration_file_path + "/" + file_path + "/ping-" + str(src) + "-" +
         str(des) + "_" + str(time_index) + ".txt", "w")
