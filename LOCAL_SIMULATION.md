@@ -61,6 +61,28 @@ python example.py
 The example (`example.py`) exercises the full API: node creation, link setup, routing,
 ping, iperf, damage/recovery, and segment routing.
 
+## Makefile (setup and OSPF vs SDN comparison)
+
+From the project root (with Docker running):
+
+```bash
+make setup          # pip install -e . + docker pull lwsen/starlab_node:1.0
+make test           # SDN routing unit tests
+
+make ospf           # full OSPF experiment  → starlink-…-ospf-full/
+make sdn            # full SDN experiment   → starlink-…-sdn-full/
+make stats          # summarize both full runs (ping + metrics)
+
+make ospf_simple    # basic profile (no damage)
+make sdn_simple
+make stats_simple
+
+make compare        # ospf + sdn + stats (long)
+make help           # list all targets
+```
+
+Artifact directories are created automatically; no manual `mv` is needed.
+
 ## What happens step by step
 
 ### 1. Orbital computation — `StarryNet(...)`
@@ -107,8 +129,12 @@ For every link the orchestrater:
 4. Applies `tc qdisc netem delay Xms loss 1% rate 5Gbit` — the delay value is the
    physically correct propagation delay for that satellite pair at second 1
 
-**Ground-satellite links (GSLs)** follow the same process using `9.x.x.0/24` subnets
-and the naming scheme `GS_N` / `GSL_X-Y`.
+**Ground-satellite links (GSLs)** use the same Docker/`tc` steps with `9.x.x.0/24` subnets
+and names `GS_N` / `GSL_X-Y`, but unlike fixed ISL peers, ground stations stay at
+configured lat/long while satellites move: the `Observer` precomputes each second who is
+in range (latitude window, max distance, optional antenna cap) into the delay matrices,
+and `create_links` only brings up GSLs where `delay/1.txt` has a non-zero entry—later
+changes come from `Topo_leo_change.txt`, not from GS motion.
 
 ### 4. Routing — `run_routing_deamon()`
 
