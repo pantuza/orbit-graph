@@ -20,7 +20,7 @@ setup(
     'StarryNet for the emulation of satellite Internet constellations.',
     author=' Yangtao Deng',
     author_email='dengyt21@mails.tsinghua.edu.cn',
-    packages=['starrynet'],
+    packages=find_packages(),
     long_description="""
         StarryNet is a network emulator for satellite Internet constellations.
         """,
