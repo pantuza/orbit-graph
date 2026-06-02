@@ -163,7 +163,18 @@ def sn_get_param(file_):
 
 
 def sn_local_cmd(cmd):
-    result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+    # stdin=DEVNULL: never hand the controlling terminal to a child command.
+    # Otherwise `docker exec -t` (allocate TTY) would put the terminal into raw
+    # mode, and with StarryNet's concurrent command threads the save/restore
+    # races and leaves the terminal stuck (no carriage returns -> staircased
+    # output). Detaching stdin makes that impossible.
+    result = subprocess.run(
+        cmd,
+        shell=True,
+        capture_output=True,
+        text=True,
+        stdin=subprocess.DEVNULL,
+    )
     lines = result.stdout.splitlines(keepends=True)
     return lines
 
@@ -793,14 +804,14 @@ def sn_recover(damage_list, sat_loss, remote_ssh, remote_ftp, file_path,
 
 def sn_sr(src, des, target, container_id_list, remote_ssh):
     ifconfig_output = sn_remote_cmd(
-        remote_ssh, "docker exec -it " + str(container_id_list[des - 1]) +
+        remote_ssh, "docker exec -i " + str(container_id_list[des - 1]) +
         " ifconfig | sed 's/[ \t].*//;/^\(eth0\|\)\(lo\|\)$/d'")
     des_IP = sn_remote_cmd(
         remote_ssh,
-        "docker exec -it " + str(container_id_list[des - 1]) + " ifconfig " +
+        "docker exec -i " + str(container_id_list[des - 1]) + " ifconfig " +
         ifconfig_output[0][:-1] + "|awk -F '[ :]+' 'NR==2{print $4}'")
     target_IP = sn_remote_cmd(
-        remote_ssh, "docker exec -it " + str(container_id_list[target - 1]) +
+        remote_ssh, "docker exec -i " + str(container_id_list[target - 1]) +
         " ifconfig B" + str(target) + "-eth" + str(src) +
         "|awk -F '[ :]+' 'NR==2{print $4}'")
     sn_remote_cmd(
@@ -876,7 +887,7 @@ def sn_route(src, time_index, file_path, configuration_file_path,
              container_id_list, remote_ssh):
     route_result = sn_remote_cmd(
         remote_ssh,
-        "docker exec -it " + str(container_id_list[src - 1]) + " route ")
+        "docker exec -i " + str(container_id_list[src - 1]) + " route ")
     f = open(
         configuration_file_path + "/" + file_path + "/route-" + str(src) +
         "_" + str(time_index) + ".txt", "w")
@@ -905,7 +916,7 @@ def sn_establish_new_GSL(container_id_list, matrix, constellation_size, bw,
         str(container_id_list[i - 1]) + " --ip 9." + str(address_16_23) + "." +
         str(address_8_15) + ".50")
     ifconfig_output = sn_remote_cmd(
-        remote_ssh, "docker exec -it " + str(container_id_list[i - 1]) +
+        remote_ssh, "docker exec -i " + str(container_id_list[i - 1]) +
         " ip addr | grep -B 2 9." + str(address_16_23) + "." +
         str(address_8_15) +
         ".50 | head -n 1 | awk -F: '{ print $2 }' | tr -d [:blank:]")
@@ -940,7 +951,7 @@ def sn_establish_new_GSL(container_id_list, matrix, constellation_size, bw,
         str(container_id_list[j - 1]) + " --ip 9." + str(address_16_23) + "." +
         str(address_8_15) + ".60")
     ifconfig_output = sn_remote_cmd(
-        remote_ssh, "docker exec -it " + str(container_id_list[j - 1]) +
+        remote_ssh, "docker exec -i " + str(container_id_list[j - 1]) +
         " ip addr | grep -B 2 9." + str(address_16_23) + "." +
         str(address_8_15) +
         ".60 | head -n 1 | awk -F: '{ print $2 }' | tr -d [:blank:]")
