@@ -47,6 +47,13 @@ class SdnController:
         """
         refresh = reason in ("init", "topology_change", "damage_recovery")
 
+        # wall_start/wall_end are epoch seconds (same clock as the container-side
+        # outage probe's `ping -D` timestamps), so outage analysis can align the
+        # data-plane recovery to this control-plane event. compute_ms is the
+        # algorithmic controller cost (graph load + Dijkstra); install_ms is the
+        # dataplane push cost (docker-exec route install) and is a harness
+        # artifact, not inherent to SDN -- we keep them separate for fairness.
+        wall_start = time.time()
         t0 = time.perf_counter()
         graph = load_graph(
             self.config.delay_dir,
@@ -60,6 +67,7 @@ class SdnController:
             and self._last_fib is not None
             and fib_equal(fib, self._last_fib)
         )
+        compute_ms = (time.perf_counter() - t0) * 1000.0
 
         if fib_unchanged:
             install_stats = {
@@ -69,17 +77,25 @@ class SdnController:
                 "deleted": 0,
                 "on_link": 0,
             }
+            install_ms = 0.0
         else:
+            ti0 = time.perf_counter()
             install_stats = self.dataplane.install_fib(
                 fib, refresh_addresses=refresh)
+            install_ms = (time.perf_counter() - ti0) * 1000.0
             self._last_fib = fib
 
         elapsed_ms = (time.perf_counter() - t0) * 1000.0
+        wall_end = time.time()
 
         metrics = {
             "time_index": time_index,
             "reason": reason,
             "recompute_ms": round(elapsed_ms, 2),
+            "compute_ms": round(compute_ms, 2),
+            "install_ms": round(install_ms, 2),
+            "wall_start": round(wall_start, 6),
+            "wall_end": round(wall_end, 6),
             "fib_entries": sum(len(v) for v in fib.values()),
             "damaged_nodes": sorted(self._damaged_nodes),
             "fib_unchanged": fib_unchanged,
