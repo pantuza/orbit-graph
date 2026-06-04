@@ -645,20 +645,34 @@ class DockerDataplane:
                     keys[src].add(key)
         return keys, failed
 
-    def install_fib(self, fib: Fib, *, refresh_addresses: bool = False) -> Dict[str, int]:
-        """Apply FIB; return counts {installed, skipped, failed, deleted}."""
+    def install_fib(
+        self,
+        fib: Fib,
+        *,
+        refresh_addresses: bool = False,
+        reset_installed: bool = False,
+    ) -> Dict[str, int]:
+        """Apply FIB; return counts {installed, skipped, failed, deleted}.
+
+        refresh_addresses re-scans container interfaces (needed when the topology
+        changed). reset_installed additionally discards the installed-route
+        baseline, forcing a full reinstall; leave it False for incremental,
+        make-before-break updates that push only changed next-hops.
+        """
         stats = {
             "installed": 0,
             "skipped": 0,
             "failed": 0,
             "deleted": 0,
             "on_link": 0,
+            "nodes_touched": 0,
         }
 
         self.enable_ip_forwarding()
         if refresh_addresses or not self._addresses_refreshed:
-            if refresh_addresses:
+            if reset_installed:
                 self._installed.clear()
+            if refresh_addresses:
                 self.wait_for_starrynet_iface_names()
             self.refresh_address_caches()
 
@@ -684,6 +698,7 @@ class DockerDataplane:
             if to_add or to_del:
                 work.append((src, to_add, to_del))
 
+        stats["nodes_touched"] = len(work)
         if not work:
             self._installed = new_installed
             return stats
@@ -716,6 +731,27 @@ class DockerDataplane:
             return f"ip route replace {dest_cidr} via {gw} dev {dev}"
         return f"ip route replace {dest_cidr} dev {dev}"
 
+    @classmethod
+    def _node_route_script(
+        cls,
+        to_add: Set[_ROUTE_KEY],
+        to_del: Set[_ROUTE_KEY],
+    ) -> List[str]:
+        """Commands for one node, make-before-break: add/replace first, del last.
+
+        `ip route replace` atomically updates a changed next-hop, so issuing all
+        adds before any deletes means a destination is never without a route
+        during an update. A delete only removes a destination that truly left the
+        FIB; for a merely-rerouted destination the matching old (gw, dev) no
+        longer exists after the replace, so its delete is a harmless no-op.
+        """
+        cmds: List[str] = []
+        for dest_cidr, gw, dev in to_add:
+            cmds.append(cls._route_add_cmd(dest_cidr, gw, dev))
+        for dest_cidr, gw, dev in to_del:
+            cmds.append(cls._route_del_cmd(dest_cidr, gw, dev))
+        return cmds
+
     def _apply_node_routes(
         self,
         src: int,
@@ -725,11 +761,7 @@ class DockerDataplane:
         if not to_add and not to_del:
             return 0, 0
         cid = self._container(src)
-        cmds: List[str] = []
-        for dest_cidr, gw, dev in to_del:
-            cmds.append(self._route_del_cmd(dest_cidr, gw, dev))
-        for dest_cidr, gw, dev in to_add:
-            cmds.append(self._route_add_cmd(dest_cidr, gw, dev))
+        cmds = self._node_route_script(to_add, to_del)
         # Avoid oversized shell one-liners (ARG_MAX / docker exec limits).
         chunk = 48
         for i in range(0, len(cmds), chunk):
