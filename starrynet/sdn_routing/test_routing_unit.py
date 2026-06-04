@@ -3,6 +3,7 @@
 import numpy as np
 
 from starrynet.sdn_routing.dataplane import (
+    DockerDataplane,
     build_peer_maps,
     canonical_host_ip,
     node_routable_ips,
@@ -184,6 +185,33 @@ def test_host_routes_unique_per_dest():
     assert len(keys) == len(hosts)
 
 
+def test_make_before_break_adds_precede_dels():
+    """Incremental update must replace/add routes before deleting old ones."""
+    to_add = {("9.38.38.10/32", "9.2.18.50", "B37-eth18")}
+    to_del = {("9.38.38.10/32", "9.1.10.50", "B37-eth10")}
+    cmds = DockerDataplane._node_route_script(to_add, to_del)
+    add_idx = next(i for i, c in enumerate(cmds) if c.startswith("ip route replace"))
+    del_idx = next(i for i, c in enumerate(cmds) if "ip route del" in c)
+    assert add_idx < del_idx, cmds
+
+
+def test_route_add_uses_replace_for_atomic_update():
+    cmd = DockerDataplane._route_add_cmd("9.38.38.10/32", "9.2.18.50", "B37-eth18")
+    assert cmd == "ip route replace 9.38.38.10/32 via 9.2.18.50 dev B37-eth18"
+    on_link = DockerDataplane._route_add_cmd("9.1.7.60/32", None, "B7-eth26")
+    assert on_link == "ip route replace 9.1.7.60/32 dev B7-eth26"
+
+
+def test_route_del_is_best_effort():
+    cmd = DockerDataplane._route_del_cmd("9.38.38.10/32", "9.1.10.50", "B37-eth10")
+    assert cmd.startswith("ip route del 9.38.38.10/32 via 9.1.10.50 dev B37-eth10")
+    assert cmd.rstrip().endswith("|| true")
+
+
+def test_node_route_script_empty_when_no_changes():
+    assert DockerDataplane._node_route_script(set(), set()) == []
+
+
 if __name__ == "__main__":
     test_triangle_shortest_path()
     test_canonical_host_ip_gs()
@@ -196,4 +224,8 @@ if __name__ == "__main__":
     test_build_peer_maps_from_iface_names()
     test_build_peer_maps_from_subnets()
     test_host_routes_unique_per_dest()
+    test_make_before_break_adds_precede_dels()
+    test_route_add_uses_replace_for_atomic_update()
+    test_route_del_is_best_effort()
+    test_node_route_script_empty_when_no_changes()
     print("ok")
