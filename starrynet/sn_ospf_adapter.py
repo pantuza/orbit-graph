@@ -99,6 +99,11 @@ class OspfMetricsCollector:
     ) -> dict:
         """Dump routes + birdc on selected nodes; write snapshot JSON."""
         dump_label = label or f"t{time_index}_{reason}"
+        # wall_start ~ when this event was applied by the emulator (this handler
+        # runs right after the topology mutation). Recorded in epoch seconds so
+        # the outage probe can align data-plane recovery to the event; symmetric
+        # with the SDN snapshot. OSPF reconverges in the background after this.
+        wall_start = time.time()
         t0 = time.perf_counter()
 
         route_lines: dict[str, int] = {}
@@ -126,6 +131,8 @@ class OspfMetricsCollector:
             "time_index": time_index,
             "reason": reason,
             "collection_ms": round(elapsed_ms, 2),
+            "wall_start": round(wall_start, 6),
+            "wall_end": round(time.time(), 6),
             "damaged_nodes": sorted(damaged_nodes or []),
             "nodes_dumped": len(self.route_dump_nodes),
             "bird_dest": self.bird_dest,
