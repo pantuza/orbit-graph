@@ -48,6 +48,35 @@ blips near an event don't short-circuit a real multi-second outage.
 > docker-exec install cost — which motivates installing *deltas* and the
 > proactive (make-before-break) SDN mode.
 
+### Incremental, make-before-break install (Phase 2)
+
+A real SDN controller ships **deltas**, not the whole table, and orders updates
+so a destination is never without a route. We model both:
+
+- **Incremental (default, `incremental_install=True`)**: on a routing event we
+  re-scan addresses to learn the new topology but **keep the installed-route
+  baseline**, then push only the next-hops that changed. Per node we issue all
+  `ip route replace` (add/update) commands **before** any `ip route del`
+  (make-before-break): `replace` is atomic, so a rerouted destination is updated
+  in place and its stale `del` becomes a harmless no-op. This collapses
+  `install_ms` from "push 1500+ routes" to "push the few that moved" and keeps
+  data-plane `outage_ms` at/near zero.
+- **Full reinstall baseline (`SDN_FULL_REINSTALL=1`)**: discards the baseline and
+  re-pushes the entire FIB on every event — the naive approach. Useful as a
+  paper comparison point to quantify the cost of *not* doing incremental updates
+  (large `install_ms`, every node touched).
+
+| Metric | Incremental | Full reinstall |
+|---|---|---|
+| `install_ms` (topology change) | small (delta only) | large (whole table) |
+| `nodes_touched` | few (handover-affected) | all nodes |
+| `compute_ms` | unchanged (~2–3 ms) | unchanged (~2–3 ms) |
+| `outage_ms` | ~0 (make-before-break) | ~0 (atomic replace) |
+
+Report `compute_ms` as the inherent SDN control cost; report incremental
+`install_ms`/`nodes_touched` as the realistic data-plane update cost, and
+optionally the full-reinstall numbers to motivate incremental updates.
+
 ## Control-plane metrics (routing events vs steady state)
 
 ### SDN (central controller + kernel static routes)
@@ -57,6 +86,7 @@ blips near an event don't short-circuit a real multi-second outage.
 | **`recompute_ms` (routing event)** | `sdn_metrics/snapshot_*_{init,damage_recovery,topology_change}.json` | Total: load topology + compute FIB + push routes. **Reported, but split below for fairness.** |
 | **`compute_ms`** | SDN snapshot field | Algorithmic controller cost (graph load + Dijkstra). The defensible "SDN control" number, independent of the install mechanism. |
 | **`install_ms`** | SDN snapshot field | Dataplane push cost (per-route `docker exec`). A **harness artifact**, not inherent to SDN; a real OpenFlow/gRPC plane is far faster and delta-only. Report separately; never conflate with `compute_ms`. |
+| **`nodes_touched`** | SDN snapshot field | Number of containers that received any route change this event. With incremental install, only nodes whose next-hops changed are touched (small for a single GSL handover); with full reinstall it is every node. |
 | **`recompute_ms` (delay tick, steady)** | `sdn_metrics/snapshot_*_delay_update.json` when `fib_unchanged=true` | “Controller monitoring” overhead only (recompute without dataplane push). Should be **low** and separated from routing-event costs. |
 | **Routes pushed: `installed`, `deleted`, `failed`** | SDN snapshot JSON fields | Measures the **size of the change** applied to the network after an event. |
 | **FIB size: `fib_entries`** | SDN snapshot JSON field | Sanity check: confirms comparable scale between runs; helps normalize results. |
