@@ -20,6 +20,7 @@ def build_sdn_controller(
     *,
     route_dump_nodes: Optional[Tuple[int, ...]] = None,
     reinstall_on_delay_update: bool = True,
+    incremental_install: bool = True,
 ) -> SdnController:
     """Create an SdnController from a StarryNet instance."""
     base = os.path.join(sn.configuration_file_path, sn.file_path)
@@ -32,6 +33,7 @@ def build_sdn_controller(
         delay_dir=delay_dir,
         metrics_dir=metrics_dir,
         reinstall_on_delay_update=reinstall_on_delay_update,
+        incremental_install=incremental_install,
         route_dump_nodes=nodes,
     )
     return SdnController(config, sn.remote_ssh, sn.container_id_list)
@@ -42,12 +44,14 @@ def run_sdn_initial_routes(
     *,
     route_dump_nodes: Optional[Tuple[int, ...]] = None,
     reinstall_on_delay_update: bool = True,
+    incremental_install: bool = True,
 ) -> None:
     """Install routes for second 1 (post link init). No BIRD/OSPF."""
     controller = build_sdn_controller(
         sn,
         route_dump_nodes=route_dump_nodes,
         reinstall_on_delay_update=reinstall_on_delay_update,
+        incremental_install=incremental_install,
     )
     sn.sdn_controller = controller
     controller.install_snapshot(1, reason="init")
