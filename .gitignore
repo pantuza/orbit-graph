@@ -56,3 +56,7 @@ dkms.conf
 __pycache__
 *.egg-info/
 starlink-*/
+.config_scaled_*.json
+.logs/
+batch_results/
+scale_results/
