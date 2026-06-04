@@ -79,9 +79,16 @@ class SdnController:
             }
             install_ms = 0.0
         else:
+            # Incremental install keeps the route baseline across events so only
+            # changed next-hops are pushed (make-before-break). Only force a full
+            # reinstall (reset baseline) when incremental_install is disabled.
+            reset_installed = refresh and not self.config.incremental_install
             ti0 = time.perf_counter()
             install_stats = self.dataplane.install_fib(
-                fib, refresh_addresses=refresh)
+                fib,
+                refresh_addresses=refresh,
+                reset_installed=reset_installed,
+            )
             install_ms = (time.perf_counter() - ti0) * 1000.0
             self._last_fib = fib
 
@@ -115,6 +122,7 @@ class SdnController:
                 f"installed={metrics['installed']} "
                 f"skipped={metrics['skipped']} "
                 f"deleted={metrics.get('deleted', 0)} "
+                f"nodes_touched={metrics.get('nodes_touched', 0)} "
                 f"on_link={metrics.get('on_link', 0)} "
                 f"failed={metrics['failed']} "
                 f"in {metrics['recompute_ms']}ms"
