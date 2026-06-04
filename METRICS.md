@@ -11,13 +11,52 @@ This file defines the **paper-facing** metrics we will report from StarryNet run
 | **Path / hop sequence (qualitative)** | `trace-26-27_<tag>.txt` (ICMP traceroute) and `route-get-26-27_<tag>.txt` | Confirms the path matches expectations (e.g. GS→sat→sat→GS), helps debug regressions. |
 | **Ping after topology change (handover-relative)** | `ping-<gs1>-<gs2>_<t>.txt` at the handover tick + 2s after (full profile) | Reachability immediately after the GSL handover / `topology_change` event. The handover tick is **geometry-dependent** (t=53 for 5x5, t=23 for 6x6, ...), read per run from `Topo_leo_change.txt`, so we ping relative to it instead of a fixed time. |
 
+## Data-plane outage / recovery time (the fair convergence metric)
+
+The synchronous emulation loop runs control-plane events inline, and an SDN
+route install can **block the loop for several seconds**. A tick-scheduled ping
+therefore only runs *after* the install finishes and **hides the real outage**.
+To measure convergence honestly and identically for both protocols, a
+high-rate `ping -D -O` runs **inside the source GS container** for the whole
+run (`outage-<gs1>-<gs2>.txt`), timestamped on the host clock. Each control
+snapshot records `wall_start` (epoch); we measure **outage = duration of the
+sustained loss burst triggered near the event** (onset → first sustained
+recovery).
+
+**Loss definition (important):** a packet counts as *lost* only if its
+`icmp_seq` **never** gets a `bytes from` reply (or returns ICMP *Unreachable*).
+`ping -O`'s `"no answer yet for icmp_seq=N"` is **not** loss — with a sub-RTT
+probe interval the kernel prints it for every in-flight packet that then
+replies, so treating it as loss makes every outage read as ~0 ms. We also
+require a **sustained** burst (≥3 consecutive losses ≈ 300 ms) to mark onset and
+≥3 consecutive replies to mark recovery, so isolated jitter drops/late-reply
+blips near an event don't short-circuit a real multi-second outage.
+
+| Metric | Source | Why it matters |
+|---|---|---|
+| **`outage_ms` per event** | `outage-*.txt` probe aligned to snapshot `wall_start` (see `experiments/outage.py`) | The honest, symmetric convergence metric: real data-plane downtime after damage/recovery and topology change, for OSPF and SDN alike. This is the headline. |
+| **`still_down`** | derived | The probe never recovered before teardown (path stayed black-holed). |
+
+> Example (6×6 GSL handover, seed 1001): **OSPF black-holed ~5.2 s** during
+> reconvergence (ICMP Net-Unreachable then 50 dropped probes, RTT collapsing
+> 240 ms → 27 ms on the new path), while **SDN had 0 sustained outage** — its
+> atomic `ip route replace` preserved forwarding even though the control-plane
+> install *blocked the loop* for 6.4 s (of which compute was only ~2.3 ms).
+
+> Note: OSPF "convergence" is reported as this data-plane recovery (we don't
+> trust BIRD's dump time as convergence). For SDN, recovery includes the
+> docker-exec install cost — which motivates installing *deltas* and the
+> proactive (make-before-break) SDN mode.
+
 ## Control-plane metrics (routing events vs steady state)
 
 ### SDN (central controller + kernel static routes)
 
 | Metric | Source | Interpretation |
 |---|---|---|
-| **`recompute_ms` (routing event)** | `sdn_metrics/snapshot_*_{init,damage_recovery,topology_change}.json` | Time to load topology, compute FIB, and push routes for **events that can change forwarding**. |
+| **`recompute_ms` (routing event)** | `sdn_metrics/snapshot_*_{init,damage_recovery,topology_change}.json` | Total: load topology + compute FIB + push routes. **Reported, but split below for fairness.** |
+| **`compute_ms`** | SDN snapshot field | Algorithmic controller cost (graph load + Dijkstra). The defensible "SDN control" number, independent of the install mechanism. |
+| **`install_ms`** | SDN snapshot field | Dataplane push cost (per-route `docker exec`). A **harness artifact**, not inherent to SDN; a real OpenFlow/gRPC plane is far faster and delta-only. Report separately; never conflate with `compute_ms`. |
 | **`recompute_ms` (delay tick, steady)** | `sdn_metrics/snapshot_*_delay_update.json` when `fib_unchanged=true` | “Controller monitoring” overhead only (recompute without dataplane push). Should be **low** and separated from routing-event costs. |
 | **Routes pushed: `installed`, `deleted`, `failed`** | SDN snapshot JSON fields | Measures the **size of the change** applied to the network after an event. |
 | **FIB size: `fib_entries`** | SDN snapshot JSON field | Sanity check: confirms comparable scale between runs; helps normalize results. |
@@ -61,7 +100,9 @@ python experiments/compare_batch.py --reps 10 --modes ospf,sdn --profile full
 | `ping_summary_by_phase.csv` | Per (nodes, mode, **phase**): handover-relative view (`post_init`, `handover`, `post_handover`, `steady`) that aligns across sizes. Use this for cross-size dataplane charts. |
 | `control_raw.csv` | One row per (mode, rep, snapshot): `time_ms`, `reason`, `routing_event`, `installed`, `fib_unchanged`. |
 | `control_summary.csv` | Per (mode, routing event `reason@time`): mean/stddev of `time_ms`, plus `n` (samples) and `reps` (distinct reps contributing). |
-| `control_summary_by_reason.csv` | Per (mode, `reason`): `time_ms` and `installed` pooled across time indices. Use this for seed-dependent events (e.g. all `delay_update` FIB changes) so they form one stable bucket. |
+| `control_summary_by_reason.csv` | Per (mode, `reason`): `time_ms`, `compute_ms`, `install_ms`, `installed` pooled across time indices. Use this for seed-dependent events and to separate SDN compute vs install cost. |
+| `outage_raw.csv` | One row per (mode, rep, event): `outage_ms`, `still_down` — data-plane downtime from the continuous probe. |
+| `outage_summary.csv` | Per (nodes, mode, `reason`): mean/stddev `outage_ms`. **The headline convergence comparison.** |
 
 **Reporting:** use `ping_summary_by_phase.csv` for the headline loss/RTT claims
 (with stddev/error bars), especially across sizes. For control-plane cost:
