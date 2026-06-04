@@ -22,6 +22,17 @@ class SdnConfig:
     Set False to skip delay ticks entirely (fast basic runs).
     """
 
+    incremental_install: bool = True
+    """
+    On routing events (topology_change, damage_recovery): refresh address caches
+    to learn the new topology, but KEEP the installed route baseline so only the
+    next-hops that actually changed are pushed (make-before-break, production-
+    like). This is what an SDN controller does -- it ships deltas, not the whole
+    table. Set False to force a full reinstall on every event (the naive
+    baseline; useful as a comparison point in the paper to show the cost of not
+    doing incremental updates).
+    """
+
     parallel_workers: int = 8
     """Parallel docker exec workers for dataplane pushes."""
 
