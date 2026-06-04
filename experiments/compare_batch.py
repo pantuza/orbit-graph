@@ -16,9 +16,12 @@ Outputs (under --out-dir):
   ping_raw.csv             one row per (mode, rep, ping time tag), incl. phase
   ping_summary.csv         mean/stddev of loss/RTT per (nodes, mode, time tag)
   ping_summary_by_phase.csv mean/stddev per (nodes, mode, handover-relative phase)
-  control_raw.csv          one row per (mode, rep, control-plane snapshot)
+  control_raw.csv          one row per (mode, rep, control-plane snapshot),
+                           incl. compute_ms/install_ms (SDN)
   control_summary.csv      mean/stddev of control-plane time per (nodes, mode, event)
-  control_summary_by_reason.csv pooled per (nodes, mode, reason)
+  control_summary_by_reason.csv pooled per (nodes, mode, reason) incl. compute/install
+  outage_raw.csv           one row per (mode, rep, event): data-plane outage_ms
+  outage_summary.csv       mean/stddev data-plane outage per (nodes, mode, reason)
 """
 
 from __future__ import annotations
@@ -44,6 +47,7 @@ from compare_summarize import (  # noqa: E402  (path set above)
     _load_snapshots,
     _parse_ping,
 )
+from outage import run_outages  # noqa: E402  (path set above)
 
 _SINGLE_RUN = os.path.join(_HERE, "compare_single_run.py")
 _ARTIFACT_RE = re.compile(r"^BATCH_ARTIFACT_DIR=(.+)$")
@@ -248,10 +252,40 @@ def _collect_control(
             "reason": snap.get("reason"),
             "event": f"{snap.get('reason')}@t{snap.get('time_index')}",
             "time_ms": snap.get(time_key),
+            # SDN only: separate algorithmic compute from dataplane install cost
+            # (install via docker-exec is a harness artifact, not inherent SDN).
+            "compute_ms": snap.get("compute_ms"),
+            "install_ms": snap.get("install_ms"),
             "routing_event": _is_routing_event(snap),
             "installed": snap.get("installed"),
             "fib_unchanged": snap.get("fib_unchanged"),
             "bird_route_ok": snap.get("bird_route_ok"),
+        })
+    return rows
+
+
+def _collect_outage(
+    artifact_dir: str,
+    mode: str,
+    profile: str,
+    rep: int,
+    seed: int,
+    nodes: Optional[int],
+    pair: Optional[str],
+) -> List[dict]:
+    rows = []
+    for r in run_outages(artifact_dir, mode, pair):
+        rows.append({
+            "mode": mode,
+            "profile": profile,
+            "nodes": nodes,
+            "rep": rep,
+            "seed": seed,
+            "reason": r["reason"],
+            "time_index": r["time_index"],
+            "event": r["event"],
+            "outage_ms": r["outage_ms"],
+            "still_down": r["still_down"],
         })
     return rows
 
@@ -398,6 +432,10 @@ def _summarize_control_by_reason(rows: List[dict]) -> List[dict]:
         n, mean, std = _agg([i["time_ms"] for i in items])
         _n_inst, inst_mean, inst_std = _agg(
             [i["installed"] for i in items if i["installed"] is not None])
+        _nc, compute_mean, _cs = _agg(
+            [i.get("compute_ms") for i in items if i.get("compute_ms") is not None])
+        _ni, install_mean, _is = _agg(
+            [i.get("install_ms") for i in items if i.get("install_ms") is not None])
         out.append({
             "nodes": nodes,
             "mode": mode,
@@ -406,8 +444,32 @@ def _summarize_control_by_reason(rows: List[dict]) -> List[dict]:
             "reps": len({i["rep"] for i in items}),
             "time_ms_mean": mean,
             "time_ms_std": std,
+            "compute_ms_mean": compute_mean,
+            "install_ms_mean": install_mean,
             "installed_mean": inst_mean,
             "installed_std": inst_std,
+        })
+    out.sort(key=lambda s: (_sort_key(s), s["reason"]))
+    return out
+
+
+def _summarize_outage(rows: List[dict]) -> List[dict]:
+    """Per (nodes, mode, reason) data-plane outage stats (pooled across time)."""
+    grouped: Dict[Tuple[Optional[int], str, str], List[dict]] = defaultdict(list)
+    for r in rows:
+        grouped[(r["nodes"], r["mode"], r["reason"])].append(r)
+    out = []
+    for (nodes, mode, reason), items in grouped.items():
+        n, mean, std = _agg([i["outage_ms"] for i in items])
+        out.append({
+            "nodes": nodes,
+            "mode": mode,
+            "reason": reason,
+            "n": len(items),
+            "reps": len({i["rep"] for i in items}),
+            "outage_ms_mean": mean,
+            "outage_ms_std": std,
+            "still_down": sum(1 for i in items if i["still_down"]),
         })
     out.sort(key=lambda s: (_sort_key(s), s["reason"]))
     return out
@@ -454,14 +516,28 @@ def _print_control_table(summary: List[dict]) -> None:
 def _print_control_by_reason_table(summary: List[dict]) -> None:
     print("\n" + "=" * 78)
     print("CONTROL-PLANE SUMMARY by reason (pooled across time; mean +/- stddev)")
+    print("SDN time = compute (Dijkstra) + install (docker-exec push); "
+          "OSPF time = dump cost")
+    print("=" * 78)
+    print(f"{'nodes':>5} {'mode':6} {'reason':16} {'n':>3} "
+          f"{'time ms':>12} {'compute ms':>11} {'install ms':>11} {'installed':>10}")
+    for s in summary:
+        print(f"{str(s['nodes']):>5} {s['mode']:6} {s['reason']:16} {s['n']:>3} "
+              f"{_fmt(s['time_ms_mean']):>12} {_fmt(s['compute_ms_mean']):>11} "
+              f"{_fmt(s['install_ms_mean']):>11} {_fmt(s['installed_mean']):>10}")
+
+
+def _print_outage_table(summary: List[dict]) -> None:
+    print("\n" + "=" * 78)
+    print("DATA-PLANE OUTAGE by reason (event -> recovery; mean +/- stddev)")
+    print("Same probe for OSPF and SDN: time from event until first reply gets through")
     print("=" * 78)
     print(f"{'nodes':>5} {'mode':6} {'reason':18} {'n':>3} {'reps':>4} "
-          f"{'time ms (mean+/-sd)':>22} {'installed (mean+/-sd)':>22}")
+          f"{'outage ms (mean+/-sd)':>24} {'still_down':>10}")
     for s in summary:
-        t = f"{_fmt(s['time_ms_mean'])}+/-{_fmt(s['time_ms_std'])}"
-        inst = f"{_fmt(s['installed_mean'])}+/-{_fmt(s['installed_std'])}"
+        o = f"{_fmt(s['outage_ms_mean'])}+/-{_fmt(s['outage_ms_std'])}"
         print(f"{str(s['nodes']):>5} {s['mode']:6} {s['reason']:18} "
-              f"{s['n']:>3} {s['reps']:>4} {t:>22} {inst:>22}")
+              f"{s['n']:>3} {s['reps']:>4} {o:>24} {s['still_down']:>10}")
 
 
 def main() -> None:
@@ -489,6 +565,7 @@ def main() -> None:
 
     ping_rows: List[dict] = []
     control_rows: List[dict] = []
+    outage_rows: List[dict] = []
     failures: List[str] = []
     missing: List[str] = []
 
@@ -507,15 +584,20 @@ def main() -> None:
                     meta.get("handover_t"), meta.get("steady_t"))
                 cr = _collect_control(
                     meta["artifact_dir"], mode, args.profile, rep, seed, nodes)
+                outr = _collect_outage(
+                    meta["artifact_dir"], mode, args.profile, rep, seed, nodes,
+                    meta.get("pair"))
                 missing.extend(
                     _check_missing(mode, nodes, rep, args.profile, pr, cr))
                 ping_rows.extend(pr)
                 control_rows.extend(cr)
+                outage_rows.extend(outr)
 
     ping_summary = _summarize_ping(ping_rows)
     ping_by_phase = _summarize_ping_by_phase(ping_rows)
     control_summary = _summarize_control(control_rows)
     control_by_reason = _summarize_control_by_reason(control_rows)
+    outage_summary = _summarize_outage(outage_rows)
 
     _write_csv(
         os.path.join(args.out_dir, "ping_raw.csv"),
@@ -539,8 +621,8 @@ def main() -> None:
         os.path.join(args.out_dir, "control_raw.csv"),
         control_rows,
         ["mode", "profile", "nodes", "rep", "seed", "time_index", "reason",
-         "event", "time_ms", "routing_event", "installed", "fib_unchanged",
-         "bird_route_ok"],
+         "event", "time_ms", "compute_ms", "install_ms", "routing_event",
+         "installed", "fib_unchanged", "bird_route_ok"],
     )
     _write_csv(
         os.path.join(args.out_dir, "control_summary.csv"),
@@ -551,13 +633,26 @@ def main() -> None:
         os.path.join(args.out_dir, "control_summary_by_reason.csv"),
         control_by_reason,
         ["nodes", "mode", "reason", "n", "reps", "time_ms_mean", "time_ms_std",
-         "installed_mean", "installed_std"],
+         "compute_ms_mean", "install_ms_mean", "installed_mean", "installed_std"],
+    )
+    _write_csv(
+        os.path.join(args.out_dir, "outage_raw.csv"),
+        outage_rows,
+        ["mode", "profile", "nodes", "rep", "seed", "reason", "time_index",
+         "event", "outage_ms", "still_down"],
+    )
+    _write_csv(
+        os.path.join(args.out_dir, "outage_summary.csv"),
+        outage_summary,
+        ["nodes", "mode", "reason", "n", "reps", "outage_ms_mean",
+         "outage_ms_std", "still_down"],
     )
 
     _print_ping_table(ping_summary)
     _print_ping_by_phase_table(ping_by_phase)
     _print_control_table(control_summary)
     _print_control_by_reason_table(control_by_reason)
+    _print_outage_table(outage_summary)
 
     print("\n" + "=" * 78)
     print(f"CSV outputs written to: {args.out_dir}")
