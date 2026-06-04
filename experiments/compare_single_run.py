@@ -51,6 +51,7 @@ from starrynet.sn_sdn_adapter import (
     warm_sdn_dest,
     warm_sdn_path_neighbors,
 )
+from starrynet.sn_outage_probe import collect_outage_probe, start_outage_probe
 from starrynet.sn_synchronizer import StarryNet
 from starrynet.sn_utils import sn_remote_cmd
 
@@ -352,7 +353,16 @@ def _run(
         for ping_t in (handover_t, post_handover_t, steady_t):
             sn.set_ping(gs1, gs2, ping_t)
 
+    # Continuous outage probe (full profile only): measures real data-plane
+    # recovery time around each event, independent of the synchronous loop.
+    outage_probe = None
+    if profile == "full":
+        outage_probe = start_outage_probe(sn, gs1, gs2, hz=10)
+
     sn.start_emulation()
+
+    if outage_probe is not None:
+        collect_outage_probe(sn, outage_probe)
 
     if is_sdn_mode(sn.intra_routing):
         dump_sdn_routes(sn, label="pre_teardown", node_ids=route_nodes)
@@ -387,6 +397,13 @@ def _run(
                     print(f"Route get @ {tag}: {fh.read().strip()}")
 
     _print_metrics_summary(work_dir, mode, profile)
+
+    if profile == "full":
+        try:
+            from outage import summarize_run as _summarize_outage_run
+            _summarize_outage_run(work_dir, mode, pair)
+        except Exception as exc:  # instrumentation must not fail the run
+            print(f"[OUTAGE] summary skipped: {exc}")
 
     # Machine-readable markers so batch runners can locate artifacts and
     # record the constellation size / endpoints for this run.
