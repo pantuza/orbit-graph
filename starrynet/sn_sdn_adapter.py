@@ -21,6 +21,7 @@ def build_sdn_controller(
     route_dump_nodes: Optional[Tuple[int, ...]] = None,
     reinstall_on_delay_update: bool = True,
     incremental_install: bool = True,
+    proactive_handover: bool = True,
 ) -> SdnController:
     """Create an SdnController from a StarryNet instance."""
     base = os.path.join(sn.configuration_file_path, sn.file_path)
@@ -34,6 +35,7 @@ def build_sdn_controller(
         metrics_dir=metrics_dir,
         reinstall_on_delay_update=reinstall_on_delay_update,
         incremental_install=incremental_install,
+        proactive_handover=proactive_handover,
         route_dump_nodes=nodes,
     )
     return SdnController(config, sn.remote_ssh, sn.container_id_list)
@@ -45,6 +47,7 @@ def run_sdn_initial_routes(
     route_dump_nodes: Optional[Tuple[int, ...]] = None,
     reinstall_on_delay_update: bool = True,
     incremental_install: bool = True,
+    proactive_handover: bool = True,
 ) -> None:
     """Install routes for second 1 (post link init). No BIRD/OSPF."""
     controller = build_sdn_controller(
@@ -52,6 +55,7 @@ def run_sdn_initial_routes(
         route_dump_nodes=route_dump_nodes,
         reinstall_on_delay_update=reinstall_on_delay_update,
         incremental_install=incremental_install,
+        proactive_handover=proactive_handover,
     )
     sn.sdn_controller = controller
     controller.install_snapshot(1, reason="init")
@@ -215,12 +219,31 @@ def sdn_after_delay_update(sn, timeptr: int) -> None:
     controller.install_snapshot(timeptr, reason="delay_update")
 
 
+def sdn_proactive_handover(sn, time_index: int) -> None:
+    """
+    Install post-handover routes after new GSL links exist, before old ones drop.
+
+    Uses the delay matrix at time_index (post-handover topology) while the
+    previous GSL is still up — make-before-break at the link level.
+    """
+    controller = getattr(sn, "sdn_controller", None)
+    if controller is None:
+        return
+    if not controller.config.proactive_handover:
+        return
+    sync_damaged_nodes(sn)
+    controller.install_snapshot(int(time_index), reason="proactive_handover")
+
+
 def sdn_after_topology_change(sn, time_index: int) -> None:
     controller = getattr(sn, "sdn_controller", None)
     if controller is None:
         return
     sync_damaged_nodes(sn)
-    controller.install_snapshot(int(time_index), reason="topology_change")
+    if controller.config.proactive_handover:
+        controller.finalize_topology_change(int(time_index))
+    else:
+        controller.install_snapshot(int(time_index), reason="topology_change")
 
 
 def sdn_after_damage_or_recovery(sn, timeptr: int) -> None:

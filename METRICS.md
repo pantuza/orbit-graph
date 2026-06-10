@@ -77,6 +77,32 @@ Report `compute_ms` as the inherent SDN control cost; report incremental
 `install_ms`/`nodes_touched` as the realistic data-plane update cost, and
 optionally the full-reinstall numbers to motivate incremental updates.
 
+### Proactive handover (Phase 3)
+
+Operator-style GSL handover: the SDN controller installs the **post-handover
+FIB** after new links are created but **before** old links are removed. OSPF
+still reconverges only after the full add+del mutation, so this phase is
+SDN-only.
+
+| Step | SDN (proactive) | OSPF |
+|---|---|---|
+| 1. Add new GSL | — | — |
+| 2. **Install post-handover routes** | `proactive_handover@t` snapshot | — |
+| 3. Delete old GSL | — | — |
+| 4. Finalize | `topology_change@t` (no-op if FIB matches) | `topology_change@t` (starts reconvergence) |
+
+| Metric | Source | Why it matters |
+|---|---|---|
+| **`proactive_handover` snapshot** | `sdn_metrics/snapshot_*_proactive_handover.json` | When SDN pushed routes relative to the link mutation — **before** the old path is torn down. |
+| **`topology_change` finalize** | `sdn_metrics/snapshot_*_topology_change.json` with `proactive_finalized=true` | Confirms no extra install was needed after the old GSL dropped. |
+| **`outage_ms` at `proactive_handover`** | outage probe + proactive `wall_start` | SDN path ready while both GSLs briefly coexist. Expect **0 ms**. |
+| **`outage_ms` at `topology_change`** | outage probe + OSPF `wall_start` | OSPF reconvergence after full mutation. Expect **multi-second** black-hole. |
+
+Disable with `SDN_PROACTIVE_HANDOVER=0` to revert to Phase 2 (install after
+add+del). For the paper: compare **OSPF `topology_change` outage** vs **SDN
+`proactive_handover` outage** — same handover event, different control-plane
+capabilities.
+
 ## Control-plane metrics (routing events vs steady state)
 
 ### SDN (central controller + kernel static routes)

@@ -45,7 +45,9 @@ class SdnController:
         Load topology for time_index, compute FIB, push routes to containers.
         Returns a metrics dict suitable for JSON logging.
         """
-        refresh = reason in ("init", "topology_change", "damage_recovery")
+        refresh = reason in (
+            "init", "topology_change", "damage_recovery", "proactive_handover",
+        )
 
         # wall_start/wall_end are epoch seconds (same clock as the container-side
         # outage probe's `ping -D` timestamps), so outage analysis can align the
@@ -124,6 +126,89 @@ class SdnController:
                 f"deleted={metrics.get('deleted', 0)} "
                 f"nodes_touched={metrics.get('nodes_touched', 0)} "
                 f"on_link={metrics.get('on_link', 0)} "
+                f"failed={metrics['failed']} "
+                f"in {metrics['recompute_ms']}ms"
+            )
+        return metrics
+
+    def finalize_topology_change(self, time_index: int) -> dict:
+        """
+        After old links are removed following a proactive handover install.
+
+        If the proactive snapshot already matches the post-del FIB, record a
+        topology_change snapshot with no dataplane push. Otherwise fall back to a
+        full install (proactive missed something).
+        """
+        wall_start = time.time()
+        t0 = time.perf_counter()
+        graph = load_graph(
+            self.config.delay_dir,
+            time_index,
+            link_threshold=self.config.link_threshold,
+            damaged_nodes=self._damaged_nodes,
+        )
+        fib = compute_fib(graph, self.config.node_count)
+        compute_ms = (time.perf_counter() - t0) * 1000.0
+
+        fib_unchanged = (
+            self._last_fib is not None and fib_equal(fib, self._last_fib)
+        )
+
+        if fib_unchanged:
+            install_stats = {
+                "installed": 0,
+                "skipped": 0,
+                "failed": 0,
+                "deleted": 0,
+                "on_link": 0,
+                "nodes_touched": 0,
+            }
+            install_ms = 0.0
+        else:
+            reset_installed = not self.config.incremental_install
+            ti0 = time.perf_counter()
+            install_stats = self.dataplane.install_fib(
+                fib,
+                refresh_addresses=True,
+                reset_installed=reset_installed,
+            )
+            install_ms = (time.perf_counter() - ti0) * 1000.0
+            self._last_fib = fib
+
+        elapsed_ms = (time.perf_counter() - t0) * 1000.0
+        wall_end = time.time()
+        reason = "topology_change"
+
+        metrics = {
+            "time_index": time_index,
+            "reason": reason,
+            "recompute_ms": round(elapsed_ms, 2),
+            "compute_ms": round(compute_ms, 2),
+            "install_ms": round(install_ms, 2),
+            "wall_start": round(wall_start, 6),
+            "wall_end": round(wall_end, 6),
+            "fib_entries": sum(len(v) for v in fib.values()),
+            "damaged_nodes": sorted(self._damaged_nodes),
+            "fib_unchanged": fib_unchanged,
+            "proactive_finalized": True,
+            **install_stats,
+        }
+        self._write_metrics(metrics, time_index, reason)
+        if fib_unchanged:
+            print(
+                f"[SDN] t={time_index} ({reason}): "
+                f"proactive handover complete — fib unchanged "
+                f"({metrics['fib_entries']} entries), no dataplane push in "
+                f"{metrics['recompute_ms']}ms"
+            )
+        else:
+            print(
+                f"[SDN] t={time_index} ({reason}): "
+                f"proactive fallback install fib={metrics['fib_entries']} "
+                f"installed={metrics['installed']} "
+                f"skipped={metrics['skipped']} "
+                f"deleted={metrics.get('deleted', 0)} "
+                f"nodes_touched={metrics.get('nodes_touched', 0)} "
                 f"failed={metrics['failed']} "
                 f"in {metrics['recompute_ms']}ms"
             )

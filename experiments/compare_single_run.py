@@ -320,11 +320,15 @@ def _run(
         # SDN_FULL_REINSTALL=1 forces the naive full-table reinstall on every
         # event (paper baseline to quantify the cost of non-incremental updates).
         incremental = os.environ.get("SDN_FULL_REINSTALL", "") not in ("1", "true", "yes")
+        proactive = os.environ.get("SDN_PROACTIVE_HANDOVER", "") not in (
+            "0", "false", "no",
+        )
         run_sdn_initial_routes(
             sn,
             route_dump_nodes=tuple(route_nodes),
             reinstall_on_delay_update=reinstall,
             incremental_install=incremental,
+            proactive_handover=proactive,
         )
         if profile == "basic" and is_canonical:
             _verify_sdn_path_hops(sn)

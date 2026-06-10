@@ -23,7 +23,9 @@ _SEQ_RE = re.compile(r"icmp_seq=(\d+)")
 _RTT_RE = re.compile(r"time=([\d.]+)\s*ms")
 
 # Reasons that disrupt forwarding (init has no prior connectivity to lose).
-OUTAGE_REASONS = ("damage_recovery", "topology_change")
+# proactive_handover: SDN routes pushed before old GSL is torn down (Phase 3).
+# topology_change: OSPF reconvergence after full mutation; SDN finalize (no-op).
+OUTAGE_REASONS = ("damage_recovery", "topology_change", "proactive_handover")
 
 
 def parse_probe(path: str) -> List[Tuple[float, bool]]:

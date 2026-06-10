@@ -465,6 +465,12 @@ class sn_Emulation_Start_Thread(threading.Thread):
         from starrynet.sn_sdn_adapter import sdn_after_damage_or_recovery
         sdn_after_damage_or_recovery(self.sdn_sn, timeptr)
 
+    def _sdn_proactive_handover(self, time_index):
+        if self.sdn_sn is None:
+            return
+        from starrynet.sn_sdn_adapter import sdn_proactive_handover
+        sdn_proactive_handover(self.sdn_sn, int(time_index))
+
     def _sdn_topology_change(self, time_index):
         if self.sdn_sn is None:
             return
@@ -625,6 +631,8 @@ class sn_Emulation_Start_Thread(threading.Thread):
                                          self.remote_ssh)
                     line = fi.readline()
                     words = line.split()
+                # Proactive SDN: push post-handover routes while old GSL still up.
+                self._sdn_proactive_handover(current_time)
                 line = fi.readline()
                 words = line.split()
                 if len(words) == 0:

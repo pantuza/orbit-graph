@@ -33,6 +33,14 @@ class SdnConfig:
     doing incremental updates).
     """
 
+    proactive_handover: bool = True
+    """
+    On GSL handover: push the post-handover FIB after new links are created but
+    BEFORE old links are torn down (Starlink-style make-before-break at the
+    topology level). OSPF still reconverges only after the full mutation, so
+    this is SDN-only. Set False to install routes after add+del (Phase 2 path).
+    """
+
     parallel_workers: int = 8
     """Parallel docker exec workers for dataplane pushes."""
 

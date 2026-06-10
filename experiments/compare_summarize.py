@@ -59,7 +59,7 @@ def _load_snapshots(metrics_dir: str) -> list[dict]:
 def _is_routing_event(snap: dict) -> bool:
     """Control-plane work that may change forwarding (paper-relevant)."""
     reason = snap.get("reason")
-    if reason in ("init", "topology_change", "damage_recovery"):
+    if reason in ("init", "topology_change", "damage_recovery", "proactive_handover"):
         return True
     if reason == "delay_update":
         if snap.get("fib_unchanged"):
