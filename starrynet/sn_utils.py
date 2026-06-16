@@ -162,21 +162,24 @@ def sn_get_param(file_):
     return ADJ
 
 
-def sn_local_cmd(cmd):
-    # stdin=DEVNULL: never hand the controlling terminal to a child command.
-    # Otherwise `docker exec -t` (allocate TTY) would put the terminal into raw
-    # mode, and with StarryNet's concurrent command threads the save/restore
-    # races and leaves the terminal stuck (no carriage returns -> staircased
-    # output). Detaching stdin makes that impossible.
-    result = subprocess.run(
+def sn_run_local_cmd(cmd):
+    """Run a local shell command; return the full subprocess result."""
+    return subprocess.run(
         cmd,
         shell=True,
         capture_output=True,
         text=True,
         stdin=subprocess.DEVNULL,
     )
-    lines = result.stdout.splitlines(keepends=True)
-    return lines
+
+
+def sn_local_cmd(cmd):
+    # stdin=DEVNULL: never hand the controlling terminal to a child command.
+    # Otherwise `docker exec -t` (allocate TTY) would put the terminal into raw
+    # mode, and with StarryNet's concurrent command threads the save/restore
+    # races and leaves the terminal stuck (no carriage returns -> staircased
+    # output). Detaching stdin makes that impossible.
+    return sn_run_local_cmd(cmd).stdout.splitlines(keepends=True)
 
 
 class LocalSFTP:
@@ -231,8 +234,14 @@ class sn_init_directory_thread(threading.Thread):
 
     def run(self):
         # Reset docker environment.
-        os.system("rm " + self.configuration_file_path + "/" + self.file_path +
-                  "/*.txt")
+        work = os.path.join(self.configuration_file_path,
+                            self.file_path.lstrip("./"))
+        subprocess.run(
+            f"rm -f {work}/*.txt",
+            shell=True,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+        )
         if os.path.exists(self.file_path + "/mid_files") == False:
             os.system("mkdir " + self.configuration_file_path + "/" +
                       self.file_path)
@@ -262,18 +271,26 @@ class sn_Node_Init_Thread(threading.Thread):
         # Reset docker environment.
         sn_reset_docker_env(self.remote_ssh, self.docker_service_name,
                             self.node_size)
-        # Get container list in each machine.
+        # Get container list in each machine (must match node_size).
         self.container_id_list = sn_get_container_info(self.remote_ssh)
+        if len(self.container_id_list) != self.node_size:
+            raise RuntimeError(
+                f"Expected {self.node_size} running containers after init, "
+                f"got {len(self.container_id_list)}. "
+                f"{_docker_container_status_summary(self.remote_ssh)}"
+            )
         # Rename all containers with the global idx
         sn_rename_all_container(self.remote_ssh, self.container_id_list,
                                 self.container_global_idx)
 
 
-def sn_get_container_info(remote_machine_ssh):
+def sn_get_container_info(remote_machine_ssh, *, running_only: bool = True):
     if remote_machine_ssh is None:
-        # Local mode: return sorted container names to ensure deterministic ordering.
+        # Local mode: return sorted container names (deterministic ordering).
+        status_filter = " --filter status=running" if running_only else ""
         lines = sn_local_cmd(
-            "docker ps --filter name=ovs_container --format '{{.Names}}'")
+            "docker ps --filter name=ovs_container"
+            f"{status_filter} --format '{{{{.Names}}}}'")
         names = sorted(
             [l.strip() for l in lines if l.strip()],
             key=lambda n: int(n.rsplit('_', 1)[-1]))
@@ -285,6 +302,173 @@ def sn_get_container_info(remote_machine_ssh):
     for container_idx in range(1, n_container + 1):
         container_id_list.append(all_container_info[container_idx].split()[0])
     return container_id_list
+
+
+def _docker_container_status_summary(remote_ssh) -> str:
+    """One-line diagnostic of ovs_container states (local mode)."""
+    if remote_ssh is not None:
+        return "(remote mode: check docker ps on the host)"
+    lines = sn_local_cmd(
+        "docker ps -a --filter name=ovs_container "
+        "--format '{{.Status}}'")
+    counts: dict[str, int] = {}
+    for line in lines:
+        state = line.strip().split()[0] if line.strip() else "unknown"
+        counts[state] = counts.get(state, 0) + 1
+    if not counts:
+        return "no ovs_container instances found"
+    return ", ".join(f"{k}={v}" for k, v in sorted(counts.items()))
+
+
+_OVS_CONTAINER_RM_CMD = (
+    "docker rm -f $(docker ps -aq --filter name=ovs_container) "
+    "2>/dev/null; true"
+)
+
+
+def _count_ovs_containers(remote_ssh) -> int:
+    """Count ovs_container instances in any state (including removing)."""
+    if remote_ssh is None:
+        lines = sn_local_cmd("docker ps -aq --filter name=ovs_container")
+    else:
+        lines = sn_remote_cmd(
+            remote_ssh, "docker ps -aq --filter name=ovs_container")
+    return len([line for line in lines if line.strip()])
+
+
+def sn_purge_stale_ovs_bridge_endpoints(remote_ssh) -> None:
+    """Disconnect ovs_container endpoints left on the default bridge."""
+    if remote_ssh is not None:
+        return
+    res = sn_run_local_cmd(
+        "docker network inspect bridge -f "
+        "\"{{range $k, $v := .Containers}}{{$v.Name}}\\n{{end}}\"")
+    for line in (res.stdout or "").splitlines():
+        name = line.strip()
+        if name.startswith("ovs_container_"):
+            sn_run_local_cmd(
+                f"docker network disconnect -f bridge {name} "
+                "2>/dev/null; true")
+
+
+def sn_wait_for_containers_gone(
+    remote_ssh,
+    *,
+    timeout: float = 600.0,
+    poll: float = 0.5,
+) -> None:
+    """Block until no ovs_container instances remain (any state)."""
+    deadline = time.time() + timeout
+    last_count = 0
+    while time.time() < deadline:
+        last_count = _count_ovs_containers(remote_ssh)
+        if last_count == 0:
+            return
+        time.sleep(poll)
+
+    summary = _docker_container_status_summary(remote_ssh)
+    raise RuntimeError(
+        f"Timed out after {timeout:.0f}s waiting for ovs_container cleanup "
+        f"({last_count} remain). Container states: {summary}."
+    )
+
+
+def sn_remove_all_ovs_containers(
+    remote_ssh,
+    *,
+    wait_timeout: float = 600.0,
+) -> None:
+    """Force-remove all ovs_container instances and wait until fully gone."""
+    if remote_ssh is None:
+        sn_local_cmd(_OVS_CONTAINER_RM_CMD)
+    else:
+        sn_remote_cmd(remote_ssh, _OVS_CONTAINER_RM_CMD)
+    try:
+        sn_wait_for_containers_gone(remote_ssh, timeout=wait_timeout)
+    except RuntimeError:
+        if remote_ssh is None:
+            sn_purge_stale_ovs_bridge_endpoints(remote_ssh)
+            sn_local_cmd(_OVS_CONTAINER_RM_CMD)
+        sn_wait_for_containers_gone(remote_ssh, timeout=wait_timeout)
+    if remote_ssh is None:
+        # Large grids (12x12) can leave bridge endpoints briefly after rm -f.
+        time.sleep(2.0)
+
+
+def sn_ensure_ovs_containers_gone(
+    remote_ssh=None,
+    *,
+    wait_timeout: float = 600.0,
+) -> None:
+    """Remove leftover ovs_container instances before the next emulation run."""
+    remaining = _count_ovs_containers(remote_ssh)
+    if remaining == 0:
+        return
+    print(
+        f"Waiting for {remaining} leftover ovs_container(s) to be removed "
+        "before starting the next run..."
+    )
+    sn_remove_all_ovs_containers(remote_ssh, wait_timeout=wait_timeout)
+
+
+def _docker_run_ovs_container(container_idx: int) -> tuple[int, str]:
+    """Create one ovs_container, retrying on stale bridge endpoint conflicts."""
+    name = f"ovs_container_{container_idx}"
+    cmd = (
+        f"docker run -d --name {name} --cap-add ALL --privileged "
+        "lwsen/starlab_node:1.0 ping -i 3600 127.0.0.1"
+    )
+    err = ""
+    for attempt in range(1, 4):
+        res = sn_run_local_cmd(cmd)
+        if res.returncode == 0:
+            return 0, ""
+        err = (res.stderr or res.stdout or "").strip()
+        if "already exists" not in err.lower() or attempt >= 3:
+            return res.returncode, err
+        sn_run_local_cmd(
+            f"docker rm -f {name} 2>/dev/null; "
+            f"docker network disconnect -f bridge {name} 2>/dev/null; true")
+        time.sleep(1.0 * attempt)
+    return 1, err
+
+
+def sn_wait_for_containers(
+    remote_ssh,
+    node_size: int,
+    *,
+    timeout: float = 600.0,
+) -> list:
+    """
+    Block until ``node_size`` ovs_container instances are running (local mode).
+
+    Raises RuntimeError with diagnostics when Docker did not start every node.
+    Large constellations (10x10, 12x12) can take minutes on Docker Desktop;
+    increase Docker CPU/RAM if this times out.
+    """
+    deadline = time.time() + timeout
+    last_count = 0
+    while time.time() < deadline:
+        names = sn_get_container_info(remote_ssh, running_only=True)
+        last_count = len(names)
+        if last_count == node_size:
+            return names
+        if last_count > node_size:
+            raise RuntimeError(
+                f"Found {last_count} running ovs_container instances but "
+                f"expected {node_size}. Remove orphans with:\n"
+                "  docker rm -f $(docker ps -aq --filter name=ovs_container)"
+            )
+        time.sleep(0.5)
+
+    summary = _docker_container_status_summary(remote_ssh)
+    raise RuntimeError(
+        f"Timed out after {timeout:.0f}s waiting for {node_size} running "
+        f"containers (have {last_count}). Container states: {summary}. "
+        "Try: make clean-artifacts && docker rm -f "
+        "$(docker ps -aq --filter name=ovs_container); "
+        "increase Docker Desktop CPU/RAM for large grids."
+    )
 
 
 def sn_delete_remote_network_bridge(remote_ssh):
@@ -300,17 +484,42 @@ def sn_reset_docker_env(remote_ssh, docker_service_name, node_size):
     print("Reset docker environment for constellation emulation ...")
     print("Remove legacy containers.")
     if remote_ssh is None:
-        sn_local_cmd(
-            "docker rm -f $(docker ps -aq --filter name=ovs_container) 2>/dev/null; true"
-        )
+        sn_remove_all_ovs_containers(remote_ssh)
         print("Remove legacy emulated ISLs.")
         sn_delete_remote_network_bridge(remote_ssh)
         print("Creating new containers...")
+        failures: list[tuple[int, str]] = []
+        disk_full = False
         for i in range(1, node_size + 1):
-            sn_local_cmd(
-                "docker run -d --name ovs_container_" + str(i) +
-                " --cap-add ALL --privileged"
-                " lwsen/starlab_node:1.0 ping -i 3600 127.0.0.1")
+            rc, err = _docker_run_ovs_container(i)
+            if rc != 0:
+                failures.append((i, err))
+                print(f"[Docker] ovs_container_{i} failed: {err}")
+                if "no space left on device" in err.lower():
+                    disk_full = True
+            # Avoid overwhelming Docker Desktop when spawning 100+ nodes.
+            if i % 25 == 0:
+                time.sleep(1.0)
+        if disk_full:
+            sn_remove_all_ovs_containers(remote_ssh)
+            raise RuntimeError(
+                "Docker ran out of disk space while creating containers "
+                f"(need {node_size}). Free space with:\n"
+                "  docker system prune -af\n"
+                "  docker volume prune -f\n"
+                "Then increase Docker/OrbStack disk image size in settings "
+                "and retry."
+            )
+        try:
+            sn_wait_for_containers(remote_ssh, node_size)
+        except RuntimeError as exc:
+            if failures:
+                sample = "; ".join(
+                    f"#{idx}: {msg[:120]}" for idx, msg in failures[:3])
+                raise RuntimeError(
+                    f"{exc} First docker run failures: {sample}"
+                ) from exc
+            raise
     else:
         print(sn_remote_cmd(remote_ssh, "docker service rm " + docker_service_name))
         print(sn_remote_cmd(remote_ssh, "docker rm -f $(docker ps -a -q)"))
@@ -1027,9 +1236,7 @@ class sn_Emulation_Stop_Thread(threading.Thread):
     def run(self):
         print("Deleting all native bridges and containers...")
         if self.remote_ssh is None:
-            sn_local_cmd(
-                "docker rm -f $(docker ps -aq --filter name=ovs_container) 2>/dev/null; true"
-            )
+            sn_remove_all_ovs_containers(None)
             sn_delete_remote_network_bridge(None)
         else:
             self.remote_ftp.put(
