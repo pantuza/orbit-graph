@@ -278,13 +278,22 @@ class DockerDataplane:
         self._forwarding_enabled = False
         self._addresses_refreshed = False
         self._use_canonical_dev = True
-        # Link init renames interfaces via async docker exec -d; wait long enough
-        # that all 27 containers expose B{n}-eth{m} before installing routes.
-        self._iface_wait_timeout = 90.0
-        self._iface_no_rename_abort = 90.0
+        # Link init renames interfaces via async docker exec -d; wait long
+        # enough that all containers expose B{n}-eth{m} before installing routes.
+        n = len(self.container_id_list)
+        self._iface_wait_timeout = max(90.0, min(300.0, 30.0 + n * 0.8))
+        self._iface_no_rename_abort = self._iface_wait_timeout
 
     def _container(self, node_id: int) -> str:
-        return str(self.container_id_list[node_id - 1])
+        idx = node_id - 1
+        if idx < 0 or idx >= len(self.container_id_list):
+            raise IndexError(
+                f"Node {node_id} out of range: have "
+                f"{len(self.container_id_list)} containers "
+                f"(expected >= {node_id}). Docker may have failed to start "
+                f"the full constellation."
+            )
+        return str(self.container_id_list[idx])
 
     def _run(self, cmd: str) -> List[str]:
         return sn_remote_cmd(self.remote_ssh, cmd)
