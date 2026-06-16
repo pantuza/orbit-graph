@@ -184,6 +184,27 @@ under **DATA-QUALITY WARNINGS** at the end of the run, so silently dropped
 events (e.g. a handover that didn't register) are caught instead of hiding in
 the `n`/`reps` columns.
 
+## Figures (`make plots`)
+
+After `make batch` or `make scale`, generate PDF/PNG charts from the **summary
+CSVs only** (stable filenames in one directory — not per-run artifact folders):
+
+```bash
+make scale SIZES=5x5,6x6,8x8 REPS=10
+make plots RESULTS=./scale_results FIGDIR=./figures
+```
+
+| Output | Source CSV | What it shows |
+|---|---|---|
+| `outage_vs_nodes` | `outage_summary.csv` | OSPF `topology_change` vs SDN `proactive_handover` outage (s) vs nodes |
+| `rtt_by_phase` | `ping_summary_by_phase.csv` | RTT by phase (handover, post_handover, steady, …) vs nodes |
+| `control_handover` | `control_summary_by_reason.csv` | OSPF collection vs SDN compute+install at handover |
+| `routes_installed_handover` | `control_summary_by_reason.csv` | SDN incremental route push count at handover |
+
+Point `--in-dir` / `RESULTS` at any directory that contains those CSV names
+(e.g. `./batch_results` or `./scale_results`). Requires `matplotlib`
+(`pip install matplotlib` or `make install-deps`).
+
 ## Constellation scaling (vs node count)
 
 To study how metrics scale with constellation size, run the batch across
