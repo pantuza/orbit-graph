@@ -60,3 +60,10 @@ starlink-*/
 .logs/
 batch_results/
 scale_results/
+scale_results_6x6/
+scale_results_10x10/
+scale_results_paper/*
+!scale_results_paper/README.md
+simulation.json
+simulation_12x12.json
+figures/
