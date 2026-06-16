@@ -74,6 +74,7 @@ def _prepare_config(
     base_config: str,
     orbits: int | None,
     sats: int | None,
+    duration: int | None = None,
 ) -> tuple[str, int, int, int]:
     """
     Return (config_path, n_sats, gs_count, duration).
@@ -81,6 +82,9 @@ def _prepare_config(
     When orbits/sats are given, write a derived config so the constellation
     grid can be scaled without editing the checked-in config files. The
     artifact directory name (cons-orbit-sat-...) encodes the size automatically.
+
+    When duration is given, it overrides ``Duration (s)`` in the config for
+    this run only (used by the batch runner for per-size emulation length).
     """
     with open(base_config, encoding="utf-8") as fh:
         cfg = json.load(fh)
@@ -88,6 +92,8 @@ def _prepare_config(
         cfg["# of orbit"] = orbits
     if sats is not None:
         cfg["# of satellites"] = sats
+    if duration is not None:
+        cfg["Duration (s)"] = duration
     n_sats = cfg["# of orbit"] * cfg["# of satellites"]
     gs_count = cfg["GS number"]
     duration = int(cfg["Duration (s)"])
@@ -266,6 +272,7 @@ def _run(
     seed: int | None = None,
     orbits: int | None = None,
     sats: int | None = None,
+    duration: int | None = None,
 ) -> str:
     if seed is not None:
         # Damage targets use random.uniform in-process; seeding makes the
@@ -282,7 +289,8 @@ def _run(
     else:
         base_config = os.path.join(_ROOT, "config.json")
 
-    config, n_sats, gs_count, duration = _prepare_config(base_config, orbits, sats)
+    config, n_sats, gs_count, run_duration = _prepare_config(
+        base_config, orbits, sats, duration)
     gs1, gs2 = _grid_endpoints(n_sats, gs_count)
     node_total = n_sats + gs_count
     is_canonical = n_sats == _CANONICAL_SATS
@@ -293,6 +301,7 @@ def _run(
     AS = [[1, gs2]]
 
     print(f"=== Batch: {mode.upper()} profile={profile} ({config}) ===")
+    print(f"Duration: {run_duration}s")
     print(f"Grid: {n_sats} sats + {gs_count} GS = {node_total} nodes; "
           f"endpoints GS {gs1} <-> GS {gs2}")
     print(f"Artifacts suffix: {artifact_suffix}")
@@ -354,7 +363,7 @@ def _run(
         sn.set_damage(0.3, 5)
         sn.set_recovery(10)
         handover_t, post_handover_t, steady_t = _full_ping_schedule(
-            work_dir, duration)
+            work_dir, run_duration)
         print(
             f"Handover-relative pings: handover@t={handover_t}, "
             f"post_handover@t={post_handover_t}, steady@t={steady_t}"
@@ -463,6 +472,12 @@ def main():
         default=None,
         help="Override '# of satellites' per orbit. Default: config.",
     )
+    parser.add_argument(
+        "--duration",
+        type=int,
+        default=None,
+        help="Override Duration (s) for this run. Default: config file value.",
+    )
     args = parser.parse_args()
     os.chdir(_ROOT)
     _run(
@@ -472,6 +487,7 @@ def main():
         seed=args.seed,
         orbits=args.orbits,
         sats=args.sats,
+        duration=args.duration,
     )
 
 
