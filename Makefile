@@ -11,7 +11,8 @@ DOCKER_IMAGE  = lwsen/starlab_node:1.0
 
 .PHONY: help setup install-deps docker-pull test clean clean-artifacts \
 	ospf sdn ospf_simple sdn_simple stats stats_simple compare compare_simple \
-	batch scale
+	batch scale plots paper-init paper-clean paper-plots \
+	paper-5x5 paper-6x6 paper-7x7 paper-8x8 paper-9x9 paper-10x10
 
 help: ## Show this help
 	@echo "StarryNet Makefile targets:"
@@ -72,16 +73,61 @@ compare_simple: ospf_simple sdn_simple stats_simple ## Run basic OSPF + SDN, the
 
 REPS     ?= 5
 BATCH_OUT ?= ./batch_results
-SIZES    ?= 5x5,6x6,8x8
 SCALE_OUT ?= ./scale_results
+SIMULATION ?= simulation.json
+RESULTS   ?= $(SCALE_OUT)
+FIGDIR    ?= ./figures
 
 batch: ## Repeated seeded OSPF+SDN runs with mean/stddev CSVs (REPS=5)
 	$(PYTHON) experiments/compare_batch.py --reps $(REPS) \
 		--profile full --out-dir $(BATCH_OUT)
 
-scale: ## Batches across constellation sizes (SIZES=5x5,6x6,8x8 REPS=5)
-	$(PYTHON) experiments/compare_batch.py --reps $(REPS) \
-		--profile full --sizes $(SIZES) --out-dir $(SCALE_OUT)
+scale: ## Scale sweep from simulation.json (SCALE_REPS= overrides plan reps)
+	$(PYTHON) experiments/compare_batch.py --simulation $(SIMULATION) \
+		$(if $(SCALE_REPS),--reps $(SCALE_REPS),)
+
+plots: ## Journal figures from batch/scale CSVs (RESULTS=./scale_results)
+	$(PYTHON) experiments/plot_results.py --in-dir $(RESULTS) --out-dir $(FIGDIR)
+
+# ---------------------------------------------------------------------------
+# Paper scale sweep → ./scale_results_paper/*.csv (one grid per make target)
+# ---------------------------------------------------------------------------
+
+PAPER_OUT  ?= ./scale_results_paper
+PAPER_REPS ?= 10
+
+paper-init: ## Create paper results directory
+	mkdir -p $(PAPER_OUT)
+
+paper-clean: ## Remove paper CSVs (keeps README)
+	rm -f $(PAPER_OUT)/*.csv
+
+paper-plots: ## Figures from merged paper CSVs (PAPER_OUT=./scale_results_paper)
+	$(PYTHON) experiments/plot_results.py --in-dir $(PAPER_OUT) --out-dir $(FIGDIR)
+
+paper-5x5: paper-init ## 5×5 × PAPER_REPS (default 10); fresh CSVs
+	$(PYTHON) experiments/compare_batch.py --reps $(PAPER_REPS) \
+		--sizes 5x5 --durations 5x5=100 --out-dir $(PAPER_OUT)
+
+paper-6x6: paper-init ## 6×6 × PAPER_REPS; append to scale_results_paper
+	$(PYTHON) experiments/compare_batch.py --reps $(PAPER_REPS) \
+		--sizes 6x6 --durations 6x6=120 --out-dir $(PAPER_OUT) --append
+
+paper-7x7: paper-init ## 7×7 × PAPER_REPS; append
+	$(PYTHON) experiments/compare_batch.py --reps $(PAPER_REPS) \
+		--sizes 7x7 --durations 7x7=250 --out-dir $(PAPER_OUT) --append
+
+paper-8x8: paper-init ## 8×8 × PAPER_REPS; append
+	$(PYTHON) experiments/compare_batch.py --reps $(PAPER_REPS) \
+		--sizes 8x8 --durations 8x8=300 --out-dir $(PAPER_OUT) --append
+
+paper-9x9: paper-init ## 9×9 × PAPER_REPS; append
+	$(PYTHON) experiments/compare_batch.py --reps $(PAPER_REPS) \
+		--sizes 9x9 --durations 9x9=350 --out-dir $(PAPER_OUT) --append
+
+paper-10x10: paper-init ## 10×10 × PAPER_REPS; append
+	$(PYTHON) experiments/compare_batch.py --reps $(PAPER_REPS) \
+		--sizes 10x10 --durations 10x10=400 --out-dir $(PAPER_OUT) --append
 
 # ---------------------------------------------------------------------------
 # Cleanup
@@ -93,7 +139,8 @@ clean-artifacts: ## Remove generated experiment artifact directories
 		$(ARTIFACT_ROOT)-ospf-full-r* $(ARTIFACT_ROOT)-sdn-full-r* \
 		$(ARTIFACT_ROOT)-ospf-basic-r* $(ARTIFACT_ROOT)-sdn-basic-r* \
 		./starlink-*-grid-LeastDelay-* \
-		$(ARTIFACT_ROOT) $(BATCH_OUT) $(SCALE_OUT) .config_scaled_*.json
+		$(ARTIFACT_ROOT) $(BATCH_OUT) $(SCALE_OUT) $(PAPER_OUT)/*.csv \
+		.config_scaled_*.json
 
 clean: clean-artifacts ## Remove build/pytest cache and experiment dirs
 	rm -rf build dist *.egg-info .pytest_cache
