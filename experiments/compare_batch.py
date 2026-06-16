@@ -10,7 +10,9 @@ plotting, plus a printed summary table.
 Usage:
   python experiments/compare_batch.py --reps 5
   python experiments/compare_batch.py --reps 10 --modes ospf,sdn --profile full
-  python experiments/compare_batch.py --reps 3 --out-dir ./batch_results
+  python experiments/compare_batch.py --simulation simulation.json
+  make scale
+  make scale SCALE_REPS=10 SIMULATION=simulation.json
 
 Outputs (under --out-dir):
   ping_raw.csv             one row per (mode, rep, ping time tag), incl. phase
@@ -34,6 +36,7 @@ import re
 import statistics
 import subprocess
 import sys
+import time
 from collections import defaultdict
 from typing import Dict, List, Optional, Tuple
 
@@ -41,6 +44,10 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 _ROOT = os.path.dirname(_HERE)
 if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+
+from starrynet.sn_utils import sn_ensure_ovs_containers_gone  # noqa: E402
 
 from compare_summarize import (  # noqa: E402  (path set above)
     _is_routing_event,
@@ -48,6 +55,7 @@ from compare_summarize import (  # noqa: E402  (path set above)
     _parse_ping,
 )
 from outage import run_outages  # noqa: E402  (path set above)
+from simulation_config import load_simulation_plan, print_plan  # noqa: E402
 
 _SINGLE_RUN = os.path.join(_HERE, "compare_single_run.py")
 _ARTIFACT_RE = re.compile(r"^BATCH_ARTIFACT_DIR=(.+)$")
@@ -80,6 +88,20 @@ def _fmt(x: Optional[float]) -> str:
     return "NA" if x is None else f"{x:.2f}"
 
 
+def _format_elapsed(seconds: float) -> str:
+    """Human-readable duration, similar to shell ``time`` output."""
+    if seconds >= 3600:
+        hours = int(seconds // 3600)
+        minutes = int((seconds % 3600) // 60)
+        secs = seconds % 60
+        return f"{hours}h {minutes}m {secs:.2f}s"
+    if seconds >= 60:
+        minutes = int(seconds // 60)
+        secs = seconds % 60
+        return f"{minutes}m {secs:.2f}s"
+    return f"{seconds:.2f}s"
+
+
 def _parse_sizes(spec: str) -> List[Tuple[Optional[int], Optional[int]]]:
     """Parse '5x5,6x6' into [(5,5),(6,6)]; empty -> [(None, None)] (config default)."""
     spec = spec.strip()
@@ -97,6 +119,45 @@ def _parse_sizes(spec: str) -> List[Tuple[Optional[int], Optional[int]]]:
     return out
 
 
+def _parse_durations(spec: str) -> Dict[Tuple[int, int], int]:
+    """
+    Parse '6x6=120,8x8=300' into {(6,6): 120, (8,8): 300}.
+
+    Sizes omitted from the map use the Duration (s) value in config.json /
+    config_sdn.json when the batch run starts.
+    """
+    spec = spec.strip()
+    if not spec:
+        return {}
+    out: Dict[Tuple[int, int], int] = {}
+    for token in spec.split(","):
+        token = token.strip().lower()
+        if not token:
+            continue
+        if "=" not in token:
+            raise SystemExit(
+                f"Invalid --durations token '{token}' (expected OxS=seconds)")
+        grid, secs = token.split("=", 1)
+        if "x" not in grid:
+            raise SystemExit(
+                f"Invalid --durations grid '{grid}' (expected OxS=seconds)")
+        o, s = grid.split("x", 1)
+        try:
+            duration = int(secs.strip())
+        except ValueError as exc:
+            raise SystemExit(
+                f"Invalid --durations seconds in '{token}' (expected integer)"
+            ) from exc
+        if duration < 10:
+            raise SystemExit(
+                f"Duration for {grid} must be >= 10s (got {duration})")
+        key = (int(o), int(s))
+        if key in out:
+            raise SystemExit(f"Duplicate --durations entry for {grid}")
+        out[key] = duration
+    return out
+
+
 def _run_one(
     mode: str,
     profile: str,
@@ -104,8 +165,10 @@ def _run_one(
     seed: int,
     orbits: Optional[int],
     sats: Optional[int],
-) -> Optional[dict]:
-    """Run a single experiment in a subprocess; return run metadata dict."""
+    duration: Optional[int] = None,
+) -> Tuple[Optional[dict], float]:
+    """Run a single experiment in a subprocess; return (metadata, elapsed_s)."""
+    started = time.perf_counter()
     grid = f"{orbits}x{sats}" if (orbits and sats) else "default"
     suffix = (
         f"{mode}-{profile}-{orbits}x{sats}-r{rep}"
@@ -122,8 +185,11 @@ def _run_one(
     ]
     if orbits and sats:
         cmd += ["--orbits", str(orbits), "--sats", str(sats)]
+    if duration is not None:
+        cmd += ["--duration", str(duration)]
+    dur_note = f" duration={duration}s" if duration is not None else ""
     print(f"\n{'=' * 70}")
-    print(f">>> {mode.upper()} grid={grid} rep {rep} (seed={seed}) suffix={suffix}")
+    print(f">>> {mode.upper()} grid={grid} rep {rep} (seed={seed}){dur_note} suffix={suffix}")
     print(f"{'=' * 70}", flush=True)
 
     artifact_dir: Optional[str] = None
@@ -160,19 +226,39 @@ def _run_one(
             steady_t = int(m.group(1))
     proc.wait()
 
+    try:
+        sn_ensure_ovs_containers_gone(None)
+    except RuntimeError as exc:
+        elapsed = time.perf_counter() - started
+        print(
+            f"!!! Docker cleanup after {mode} grid={grid} rep {rep}: {exc} "
+            f"({_format_elapsed(elapsed)})"
+        )
+        return None, elapsed
+
+    elapsed = time.perf_counter() - started
+
     if proc.returncode != 0:
-        print(f"!!! {mode} grid={grid} rep {rep} exited with code {proc.returncode}")
-        return None
+        print(
+            f"!!! {mode} grid={grid} rep {rep} exited with code "
+            f"{proc.returncode} ({_format_elapsed(elapsed)})"
+        )
+        return None, elapsed
     if artifact_dir is None or not os.path.isdir(artifact_dir):
-        print(f"!!! {mode} grid={grid} rep {rep}: artifact dir not found")
-        return None
+        print(
+            f"!!! {mode} grid={grid} rep {rep}: artifact dir not found "
+            f"({_format_elapsed(elapsed)})"
+        )
+        return None, elapsed
+    print(f"Finished {mode.upper()} grid={grid} rep {rep} in "
+          f"{_format_elapsed(elapsed)} ({elapsed:.2f} s)")
     return {
         "artifact_dir": artifact_dir,
         "nodes": nodes,
         "pair": pair,
         "handover_t": handover_t,
         "steady_t": steady_t,
-    }
+    }, elapsed
 
 
 def _ping_phase(
@@ -318,6 +404,94 @@ def _check_missing(
             warnings.append(
                 f"{mode} nodes={nodes} rep={rep}: missing routing event {reason}")
     return warnings
+
+
+PING_RAW_FIELDS = [
+    "mode", "profile", "nodes", "rep", "seed", "time_tag", "phase",
+    "loss_pct", "avg_rtt_ms",
+]
+CONTROL_RAW_FIELDS = [
+    "mode", "profile", "nodes", "rep", "seed", "time_index", "reason",
+    "event", "time_ms", "compute_ms", "install_ms", "routing_event",
+    "installed", "fib_unchanged", "bird_route_ok",
+]
+OUTAGE_RAW_FIELDS = [
+    "mode", "profile", "nodes", "rep", "seed", "reason", "time_index",
+    "event", "outage_ms", "still_down",
+]
+
+
+def _read_csv(path: str, fields: List[str]) -> List[dict]:
+    """Load a raw CSV written by this script; return [] when missing."""
+    if not os.path.isfile(path):
+        return []
+    with open(path, newline="", encoding="utf-8") as fh:
+        reader = csv.DictReader(fh)
+        if reader.fieldnames is None:
+            return []
+        rows: List[dict] = []
+        for row in reader:
+            parsed: dict = {}
+            for key in fields:
+                val = row.get(key)
+                if key in ("nodes", "rep", "seed", "time_index", "installed"):
+                    parsed[key] = int(val) if val not in (None, "") else None
+                elif key in ("loss_pct", "avg_rtt_ms", "time_ms", "compute_ms",
+                             "install_ms", "outage_ms"):
+                    parsed[key] = (
+                        float(val) if val not in (None, "") else None
+                    )
+                elif key == "still_down":
+                    parsed[key] = str(val).strip().lower() in (
+                        "1", "true", "yes")
+                else:
+                    parsed[key] = val
+            rows.append(parsed)
+        return rows
+
+
+def _nodes_in_rows(*row_groups: List[dict]) -> set[int]:
+    nodes: set[int] = set()
+    for group in row_groups:
+        for row in group:
+            n = row.get("nodes")
+            if n is not None:
+                nodes.add(int(n))
+    return nodes
+
+
+def _merge_appended_raw(
+    out_dir: str,
+    ping_rows: List[dict],
+    control_rows: List[dict],
+    outage_rows: List[dict],
+) -> Tuple[List[dict], List[dict], List[dict]]:
+    """
+    Merge this run into existing raw CSVs, replacing any prior rows for the
+    same ``nodes`` value (re-run of one grid size).
+    """
+    replace_nodes = _nodes_in_rows(ping_rows, control_rows, outage_rows)
+    if not replace_nodes:
+        return ping_rows, control_rows, outage_rows
+
+    def _merge(path: str, fields: List[str], new_rows: List[dict]) -> List[dict]:
+        kept = [
+            r for r in _read_csv(path, fields)
+            if r.get("nodes") not in replace_nodes
+        ]
+        return kept + new_rows
+
+    merged_ping = _merge(
+        os.path.join(out_dir, "ping_raw.csv"), PING_RAW_FIELDS, ping_rows)
+    merged_control = _merge(
+        os.path.join(out_dir, "control_raw.csv"), CONTROL_RAW_FIELDS, control_rows)
+    merged_outage = _merge(
+        os.path.join(out_dir, "outage_raw.csv"), OUTAGE_RAW_FIELDS, outage_rows)
+    print(
+        f"Appended results for nodes {sorted(replace_nodes)} into {out_dir} "
+        f"(replaced prior rows for those sizes if present)."
+    )
+    return merged_ping, merged_control, merged_outage
 
 
 def _write_csv(path: str, rows: List[dict], fields: List[str]) -> None:
@@ -540,58 +714,206 @@ def _print_outage_table(summary: List[dict]) -> None:
               f"{s['n']:>3} {s['reps']:>4} {o:>24} {s['still_down']:>10}")
 
 
+def _print_timing_summary(
+    run_times: List[dict],
+    *,
+    total_elapsed: float,
+    batch_elapsed: float,
+) -> None:
+    """Print per-run and per-size wall-clock timing (bash ``time``-style)."""
+    if not run_times:
+        return
+
+    print("\n" + "=" * 78)
+    print("TIMING (wall clock)")
+    print("=" * 78)
+    print(f"{'grid':>8} {'mode':>6} {'rep':>4} {'elapsed':>12} {'seconds':>10}")
+    size_totals: Dict[str, float] = defaultdict(float)
+    for row in run_times:
+        elapsed = row["elapsed_s"]
+        grid = row["grid"]
+        size_totals[grid] += elapsed
+        print(
+            f"{grid:>8} {row['mode']:>6} {row['rep']:>4} "
+            f"{_format_elapsed(elapsed):>12} {elapsed:>10.2f}"
+        )
+
+    if len(size_totals) > 1 or len(run_times) > 1:
+        print("-" * 78)
+        print(f"{'grid':>8} {'':>6} {'':>4} {'total':>12} {'seconds':>10}")
+        for grid in sorted(size_totals):
+            total = size_totals[grid]
+            print(
+                f"{grid:>8} {'':>6} {'':>4} "
+                f"{_format_elapsed(total):>12} {total:>10.2f}"
+            )
+
+    print("\n" + "_" * 56)
+    print(
+        f"Executed in {batch_elapsed:>9.2f} secs    experiment runs (wall clock)"
+    )
+    print(
+        f"Executed in {total_elapsed:>9.2f} secs    total including aggregation"
+    )
+    print("_" * 56)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Repeated seeded OSPF vs SDN runs with aggregated statistics")
-    parser.add_argument("--reps", type=int, default=5,
-                        help="Repetitions per mode (default 5)")
-    parser.add_argument("--modes", default="ospf,sdn",
-                        help="Comma-separated modes (default ospf,sdn)")
-    parser.add_argument("--profile", choices=("basic", "full"), default="full",
-                        help="Experiment profile (default full)")
-    parser.add_argument("--base-seed", type=int, default=1000,
-                        help="Seed for rep i is base-seed + i (default 1000)")
-    parser.add_argument("--out-dir", default=os.path.join(_ROOT, "batch_results"),
-                        help="Directory for CSV outputs (default ./batch_results)")
+    parser.add_argument(
+        "--simulation",
+        default="",
+        help="Experiment plan JSON (simulation.json). When set, loads sizes, "
+        "per-size durations, reps, out_dir, profile, modes, and base_seed "
+        "unless overridden by explicit CLI flags below.",
+    )
+    parser.add_argument("--reps", type=int, default=None,
+                        help="Repetitions per mode (default: simulation plan "
+                        "or 5)")
+    parser.add_argument("--modes", default=None,
+                        help="Comma-separated modes (default: simulation plan "
+                        "or ospf,sdn)")
+    parser.add_argument("--profile", choices=("basic", "full"), default=None,
+                        help="Experiment profile (default: simulation plan "
+                        "or full)")
+    parser.add_argument("--base-seed", type=int, default=None,
+                        help="Seed for rep i is base-seed + i (default: "
+                        "simulation plan or 1000)")
+    parser.add_argument("--out-dir", default=None,
+                        help="Directory for CSV outputs (default: "
+                        "simulation plan or ./batch_results)")
     parser.add_argument(
         "--sizes", default="",
         help="Comma-separated grid sizes 'OxS' (e.g. '5x5,6x6,10x10'). "
-        "Empty uses the config's default grid.")
+        "Empty uses simulation plan constellations or the config default grid.")
+    parser.add_argument(
+        "--durations", default="",
+        help="Per-size Duration (s), e.g. '6x6=120,8x8=300,12x12=600'. "
+        "Overrides simulation plan when both are set.")
+    parser.add_argument(
+        "--append",
+        action="store_true",
+        help="Merge raw CSVs into out-dir (replace rows for the same node count). "
+        "Use when running one grid size at a time into a shared results folder.",
+    )
     args = parser.parse_args()
 
-    modes = [m.strip() for m in args.modes.split(",") if m.strip()]
-    sizes = _parse_sizes(args.sizes)
-    os.makedirs(args.out_dir, exist_ok=True)
+    plan = None
+    if args.simulation:
+        try:
+            plan = load_simulation_plan(args.simulation, _ROOT)
+        except (FileNotFoundError, ValueError) as exc:
+            raise SystemExit(str(exc)) from exc
+        print_plan(plan)
+
+    reps = args.reps if args.reps is not None else (plan.reps if plan else 5)
+    profile = (
+        args.profile if args.profile is not None
+        else (plan.profile if plan else "full")
+    )
+    base_seed = (
+        args.base_seed if args.base_seed is not None
+        else (plan.base_seed if plan else 1000)
+    )
+    if args.out_dir is not None:
+        out_dir = args.out_dir
+    elif plan is not None:
+        out_dir = plan.out_dir
+    else:
+        out_dir = os.path.join(_ROOT, "batch_results")
+
+    if args.modes is not None:
+        modes = [m.strip() for m in args.modes.split(",") if m.strip()]
+    elif plan is not None:
+        modes = list(plan.modes)
+    else:
+        modes = ["ospf", "sdn"]
+
+    if args.sizes.strip():
+        sizes = _parse_sizes(args.sizes)
+    elif plan is not None:
+        sizes = plan.size_list()
+    else:
+        sizes = _parse_sizes("")
+
+    cli_durations = _parse_durations(args.durations)
+    if cli_durations:
+        duration_by_size = cli_durations
+    elif plan is not None:
+        duration_by_size = plan.duration_by_size()
+    else:
+        duration_by_size = {}
+
+    os.makedirs(out_dir, exist_ok=True)
+
+    main_started = time.perf_counter()
+
+    if duration_by_size:
+        print("Per-size durations (s):")
+        for (o, s), d in sorted(duration_by_size.items()):
+            print(f"  {o}x{s}: {d}")
+        if plan and not cli_durations:
+            missing = [
+                f"{o}x{s}" for o, s in sizes
+                if (o, s) not in duration_by_size
+            ]
+            if missing:
+                print(f"  (no duration in plan: {', '.join(missing)} — "
+                      "config Duration (s))")
+        elif not plan and not cli_durations:
+            print("  (other sizes: config Duration (s))")
 
     ping_rows: List[dict] = []
     control_rows: List[dict] = []
     outage_rows: List[dict] = []
     failures: List[str] = []
     missing: List[str] = []
+    run_times: List[dict] = []
+
+    batch_started = time.perf_counter()
 
     for orbits, sats in sizes:
+        grid_key = (orbits, sats) if (orbits and sats) else None
+        run_duration = (
+            duration_by_size.get(grid_key) if grid_key is not None else None
+        )
         for mode in modes:
-            for rep in range(1, args.reps + 1):
-                seed = args.base_seed + rep
-                meta = _run_one(mode, args.profile, rep, seed, orbits, sats)
+            for rep in range(1, reps + 1):
+                seed = base_seed + rep
+                meta, elapsed = _run_one(
+                    mode, profile, rep, seed, orbits, sats, run_duration)
                 grid = f"{orbits}x{sats}" if orbits else "default"
+                run_times.append({
+                    "grid": grid,
+                    "mode": mode,
+                    "rep": rep,
+                    "elapsed_s": elapsed,
+                    "ok": meta is not None,
+                })
                 if meta is None:
                     failures.append(f"{mode}-{grid}-r{rep}")
                     continue
                 nodes = meta["nodes"]
                 pr = _collect_ping(
-                    meta["artifact_dir"], mode, args.profile, rep, seed, nodes,
+                    meta["artifact_dir"], mode, profile, rep, seed, nodes,
                     meta.get("handover_t"), meta.get("steady_t"))
                 cr = _collect_control(
-                    meta["artifact_dir"], mode, args.profile, rep, seed, nodes)
+                    meta["artifact_dir"], mode, profile, rep, seed, nodes)
                 outr = _collect_outage(
-                    meta["artifact_dir"], mode, args.profile, rep, seed, nodes,
+                    meta["artifact_dir"], mode, profile, rep, seed, nodes,
                     meta.get("pair"))
                 missing.extend(
-                    _check_missing(mode, nodes, rep, args.profile, pr, cr))
+                    _check_missing(mode, nodes, rep, profile, pr, cr))
                 ping_rows.extend(pr)
                 control_rows.extend(cr)
                 outage_rows.extend(outr)
+
+    batch_elapsed = time.perf_counter() - batch_started
+
+    if args.append:
+        ping_rows, control_rows, outage_rows = _merge_appended_raw(
+            out_dir, ping_rows, control_rows, outage_rows)
 
     ping_summary = _summarize_ping(ping_rows)
     ping_by_phase = _summarize_ping_by_phase(ping_rows)
@@ -600,49 +922,45 @@ def main() -> None:
     outage_summary = _summarize_outage(outage_rows)
 
     _write_csv(
-        os.path.join(args.out_dir, "ping_raw.csv"),
+        os.path.join(out_dir, "ping_raw.csv"),
         ping_rows,
-        ["mode", "profile", "nodes", "rep", "seed", "time_tag", "phase",
-         "loss_pct", "avg_rtt_ms"],
+        PING_RAW_FIELDS,
     )
     _write_csv(
-        os.path.join(args.out_dir, "ping_summary.csv"),
+        os.path.join(out_dir, "ping_summary.csv"),
         ping_summary,
         ["nodes", "mode", "time_tag", "n", "loss_mean_pct", "loss_std_pct",
          "rtt_mean_ms", "rtt_std_ms", "n_rtt_samples"],
     )
     _write_csv(
-        os.path.join(args.out_dir, "ping_summary_by_phase.csv"),
+        os.path.join(out_dir, "ping_summary_by_phase.csv"),
         ping_by_phase,
         ["nodes", "mode", "phase", "n", "loss_mean_pct", "loss_std_pct",
          "rtt_mean_ms", "rtt_std_ms", "n_rtt_samples"],
     )
     _write_csv(
-        os.path.join(args.out_dir, "control_raw.csv"),
+        os.path.join(out_dir, "control_raw.csv"),
         control_rows,
-        ["mode", "profile", "nodes", "rep", "seed", "time_index", "reason",
-         "event", "time_ms", "compute_ms", "install_ms", "routing_event",
-         "installed", "fib_unchanged", "bird_route_ok"],
+        CONTROL_RAW_FIELDS,
     )
     _write_csv(
-        os.path.join(args.out_dir, "control_summary.csv"),
+        os.path.join(out_dir, "control_summary.csv"),
         control_summary,
         ["nodes", "mode", "event", "n", "reps", "time_ms_mean", "time_ms_std"],
     )
     _write_csv(
-        os.path.join(args.out_dir, "control_summary_by_reason.csv"),
+        os.path.join(out_dir, "control_summary_by_reason.csv"),
         control_by_reason,
         ["nodes", "mode", "reason", "n", "reps", "time_ms_mean", "time_ms_std",
          "compute_ms_mean", "install_ms_mean", "installed_mean", "installed_std"],
     )
     _write_csv(
-        os.path.join(args.out_dir, "outage_raw.csv"),
+        os.path.join(out_dir, "outage_raw.csv"),
         outage_rows,
-        ["mode", "profile", "nodes", "rep", "seed", "reason", "time_index",
-         "event", "outage_ms", "still_down"],
+        OUTAGE_RAW_FIELDS,
     )
     _write_csv(
-        os.path.join(args.out_dir, "outage_summary.csv"),
+        os.path.join(out_dir, "outage_summary.csv"),
         outage_summary,
         ["nodes", "mode", "reason", "n", "reps", "outage_ms_mean",
          "outage_ms_std", "still_down"],
@@ -654,8 +972,15 @@ def main() -> None:
     _print_control_by_reason_table(control_by_reason)
     _print_outage_table(outage_summary)
 
+    total_elapsed = time.perf_counter() - main_started
+    _print_timing_summary(
+        run_times,
+        total_elapsed=total_elapsed,
+        batch_elapsed=batch_elapsed,
+    )
+
     print("\n" + "=" * 78)
-    print(f"CSV outputs written to: {args.out_dir}")
+    print(f"CSV outputs written to: {out_dir}")
     if missing:
         print(f"\nDATA-QUALITY WARNINGS ({len(missing)} missing sample(s)):")
         for w in missing:
