@@ -1,0 +1,16 @@
+{
+    "_comment": "Paper scale plan (5x5–10x10). Run one size at a time with make paper-NxN (REPS=10).",
+    "reps": 10,
+    "out_dir": "./scale_results_paper",
+    "profile": "full",
+    "base_seed": 1000,
+    "modes": ["ospf", "sdn"],
+    "constellations": [
+        {"size": "5x5", "duration": 100},
+        {"size": "6x6", "duration": 120},
+        {"size": "7x7", "duration": 250},
+        {"size": "8x8", "duration": 300},
+        {"size": "9x9", "duration": 350},
+        {"size": "10x10", "duration": 400}
+    ]
+}
