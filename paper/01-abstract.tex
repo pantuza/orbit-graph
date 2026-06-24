@@ -1,13 +1,15 @@
 % Abstract and keywords for the IEEE TC Graph-Centric Computing special issue.
 
+% Title: OrbitGraph: Graph-Centric Software Defined Routing for LEO Satellite Constellations
+
 \begin{abstract}
 Low Earth orbit constellations form \emph{dynamic graphs}: links and weights change
 as satellites move and ground-satellite contacts hand over.
 Distributed OSPF must reconverge after each topology change, which can interrupt
 end-to-end forwarding for multiple seconds.
-We study proactive, incremental software-defined routing that recomputes shortest
-paths centrally and pushes only changed kernel routes \emph{before} the old
-ground-satellite link is torn down.
+We propose OrbitGraph, a graph-centric software-defined routing scheme that
+recomputes shortest paths centrally and pushes only changed kernel routes
+\emph{before} the old ground-satellite link is torn down.
 Using container-based emulation from $5\times 5$ to $10\times 10$ grids
 (27 to 102 nodes, ten repetitions per size and mode), we measure control-plane
 cost and data-plane availability with a continuous outage probe aligned to
