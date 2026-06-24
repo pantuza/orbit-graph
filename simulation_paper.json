@@ -9,7 +9,7 @@
         {"size": "5x5", "duration": 100},
         {"size": "6x6", "duration": 120},
         {"size": "7x7", "duration": 250},
-        {"size": "8x8", "duration": 300},
+        {"size": "8x8", "duration": 400},
         {"size": "9x9", "duration": 350},
         {"size": "10x10", "duration": 400}
     ]
