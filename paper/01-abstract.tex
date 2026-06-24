@@ -1,57 +1,34 @@
 % Abstract and keywords for the IEEE TC Graph-Centric Computing special issue.
 
 \begin{abstract}
-Low Earth orbit constellations induce \emph{dynamic graphs}: ground stations and satellites
-form a time-varying topology whose edges appear, disappear, and change weight as links
-hand over and as paths reoptimize.
-Distributed routing protocols and centralized software-defined controllers therefore
-face the same graph-centric question: how does a system update routes when the underlying
-graph changes, and at what cost to data-plane reachability as graph size grows?
-
-We study this question in StarryNet, a container-based satellite network emulator that
-runs full routing stacks under reproducible, geometry-driven topology dynamics.
-We compare OSPF (distributed link-state routing) with an SDN controller that performs
-proactive, incremental, make-before-break route installation before ground-satellite
-link teardown.
-Both modes are evaluated with identical workloads, identical probe pairs, and a
-continuous data-plane outage metric that measures sustained loss bursts aligned to
-control events, rather than tick-scheduled pings that can hide multi-second black holes.
-
-We scale constellations from $5\times 5$ to $10\times 10$ (27 to 102 emulated nodes),
-with ten independent repetitions per grid size and routing mode (120 runs total).
-At the first handover event in each run, SDN proactive handover yields
-0\,ms mean data-plane outage across all six grid sizes
-(0\,ms at 102 nodes over ten repetitions).
-OSPF exhibits multi-second topology-change outages at the same events
-(e.g., 12.9\,s mean at 51 nodes and 5.7\,s at 38 nodes on the first handover),
-while SDN maintains 0\% packet loss at the handover and post-handover ping phases
-for every grid size in the campaign.
-Control-plane cost differs: SDN Dijkstra recomputation remains on the order of
-milliseconds, but docker-mediated route installation grows from roughly 3.5\,s to
-14.2\,s at the first handover between 27 and 102 nodes, pushing 524 kernel routes
-at $10\times 10$ versus 10\,504 routes at initialization.
-OSPF route collection stays near 230\,ms but does not prevent the measured data-plane gaps.
-
-Our contributions are:
-(1)~a reproducible emulation methodology for graph-dynamic satellite networks with
-symmetric control-plane and data-plane instrumentation;
-(2)~evidence that proactive incremental SDN updates can eliminate handover black holes
-up to 102-node topologies under the studied policy, at the expense of growing
-install latency;
-and (3)~a scaling dataset and analysis pipeline (batch experiments, aggregated CSVs,
-and figure generation) released with the StarryNet artifact to support further
-graph-centric routing research on dynamic infrastructure graphs.
+Low Earth orbit constellations form \emph{dynamic graphs}: links and weights change
+as satellites move and ground-satellite contacts hand over.
+Distributed OSPF must reconverge after each topology change, which can interrupt
+end-to-end forwarding for multiple seconds.
+We study proactive, incremental software-defined routing that recomputes shortest
+paths centrally and pushes only changed kernel routes \emph{before} the old
+ground-satellite link is torn down.
+Using container-based emulation from $5\times 5$ to $10\times 10$ grids
+(27 to 102 nodes, ten repetitions per size and mode), we measure control-plane
+cost and data-plane availability with a continuous outage probe aligned to
+routing events.
+At the first handover in each run, this approach yields 0\,ms mean data-plane
+outage on all six grid sizes, while OSPF incurs 5.7\,s and 12.9\,s mean outage
+at 38 and 51 nodes, respectively, and 0\% packet loss at handover and
+post-handover ping phases throughout the campaign.
+Control-plane installation grows from 3.5\,s to 14.2\,s over the same range,
+pushing 524 routes at $10\times 10$ versus 10\,504 at initialization;
+Dijkstra recomputation remains in the millisecond range.
 \end{abstract}
 
 \begin{IEEEkeywords}
 Dynamic graphs,
+LEO satellite networks,
 software-defined networking,
-satellite networks,
-routing under topology change,
+topology handover,
+incremental routing,
 network emulation,
 graph-centric systems,
-LEO constellations,
 data-plane availability,
-incremental route installation,
-scalability
+routing scalability
 \end{IEEEkeywords}
