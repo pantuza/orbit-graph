@@ -27,6 +27,7 @@ OUTAGE_SUMMARY = "outage_summary.csv"
 OUTAGE_RAW = "outage_raw.csv"
 PING_BY_PHASE = "ping_summary_by_phase.csv"
 CONTROL_BY_REASON = "control_summary_by_reason.csv"
+CONTROL_RAW = "control_raw.csv"
 
 PHASE_ORDER = ("post_init", "handover", "post_handover", "steady")
 MODE_COLORS = {"ospf": "#d62728", "sdn": "#1f77b4"}
@@ -144,49 +145,168 @@ def _clip_lower_yerr(mean: float, std: float) -> float:
     return min(std, max(0.0, mean))
 
 
+def _truthy(val: object) -> bool:
+    return str(val).strip().lower() in ("true", "1", "yes")
+
+
+def _first_event_rows_per_rep(
+    rows: List[dict],
+    reason: str,
+) -> List[dict]:
+    """One row per (nodes, mode, rep): earliest ``time_index`` for ``reason``."""
+    best: Dict[Tuple[str, str, str], dict] = {}
+    for row in rows:
+        if row.get("reason") != reason:
+            continue
+        nodes, mode, rep = row.get("nodes"), row.get("mode"), row.get("rep")
+        ti = _int(row.get("time_index"))
+        if nodes is None or mode is None or rep is None or ti is None:
+            continue
+        key = (nodes, mode, rep)
+        prev = best.get(key)
+        if prev is None or ti < _int(prev.get("time_index")):
+            best[key] = row
+    return list(best.values())
+
+
+def _spread(values: List[float], *, use_median: bool) -> float:
+    if len(values) < 2:
+        return 0.0
+    if use_median:
+        med = statistics.median(values)
+        return statistics.median([abs(v - med) for v in values])
+    return statistics.stdev(values)
+
+
+def _aggregate_numeric_by_nodes_mode(
+    rows: List[dict],
+    value_key: str,
+    *,
+    skip_still_down: bool = True,
+    use_median: bool = False,
+) -> Dict[Tuple[str, str], Tuple[float, float, int]]:
+    """Return {(nodes, mode): (center, spread, n)} from per-rep values."""
+    grouped: Dict[Tuple[str, str], List[float]] = defaultdict(list)
+    for row in rows:
+        if skip_still_down and _truthy(row.get("still_down")):
+            continue
+        val = _float(row.get(value_key))
+        if val is None:
+            continue
+        grouped[(row["nodes"], row["mode"])].append(val)
+
+    out: Dict[Tuple[str, str], Tuple[float, float, int]] = {}
+    for key, values in grouped.items():
+        if use_median:
+            center = statistics.median(values)
+            spread = _spread(values, use_median=True)
+        else:
+            center = statistics.fmean(values)
+            spread = _spread(values, use_median=False)
+        out[key] = (center, spread, len(values))
+    return out
+
+
+def _ping_phase_plottable(row: dict, value_key: str) -> bool:
+    """Skip truncated-run rows (100% steady loss with no RTT samples)."""
+    if row.get("phase") == "steady":
+        loss = _float(row.get("loss_mean_pct"))
+        n_rtt = _int(row.get("n_rtt_samples")) or 0
+        if loss is not None and loss >= 100.0 and n_rtt == 0:
+            return False
+    return _float(row.get(value_key)) is not None
+
+
+def _plot_outage_series(
+    ax,
+    nodes: List[int],
+    agg: Dict[Tuple[str, str], Tuple[float, float, int]],
+    *,
+    mode: str,
+    label: str,
+) -> bool:
+    xs, ys, yerr = [], [], []
+    for n in nodes:
+        key = (str(n), mode)
+        if key not in agg:
+            continue
+        mean_ms, std_ms, _n = agg[key]
+        mean_s = mean_ms / 1000.0
+        std_s = std_ms / 1000.0
+        xs.append(n)
+        ys.append(mean_s)
+        yerr.append(_clip_lower_yerr(mean_s, std_s))
+    if not xs:
+        return False
+    ax.errorbar(
+        xs, ys, yerr=yerr, marker="o", capsize=4, linewidth=2,
+        label=label, color=MODE_COLORS.get(mode, None),
+    )
+    return True
+
+
 def plot_outage_vs_nodes(
     rows: List[dict],
     out_dir: str,
     dpi: int,
+    raw_rows: Optional[List[dict]] = None,
 ) -> Optional[List[str]]:
-    """Data-plane outage at handover: OSPF vs SDN (mean +/- stddev vs nodes)."""
+    """Data-plane outage at first handover per rep (not pooled multi-handover)."""
     plt = _import_matplotlib()
-    nodes = _sorted_nodes(rows)
+    nodes = _sorted_nodes(rows if raw_rows is None else raw_rows)
     if not nodes:
         print("  skip outage_vs_nodes: no node data")
         return None
 
     sdn_reason = _sdn_handover_outage_reason(rows)
-    series = [
-        ("ospf", OSPF_HANDOVER_OUTAGE, "OSPF (topology change)"),
-        ("sdn", sdn_reason, f"SDN ({sdn_reason.replace('_', ' ')})"),
-    ]
-
     fig, ax = plt.subplots(figsize=(7, 4.5))
     any_data = False
-    for mode, reason, label in series:
-        xs, ys, yerr = [], [], []
-        for n in nodes:
-            match = _filter(rows, nodes=str(n), mode=mode, reason=reason)
-            if not match:
-                continue
-            row = match[0]
-            mean = _float(row.get("outage_ms_mean"))
-            if mean is None:
-                continue
-            std = _float(row.get("outage_ms_std")) or 0.0
-            mean_s = mean / 1000.0
-            std_s = std / 1000.0
-            xs.append(n)
-            ys.append(mean_s)
-            yerr.append(_clip_lower_yerr(mean_s, std_s))
-        if not xs:
-            continue
-        any_data = True
-        ax.errorbar(
-            xs, ys, yerr=yerr, marker="o", capsize=4, linewidth=2,
-            label=label, color=MODE_COLORS.get(mode, None),
+
+    if raw_rows:
+        ospf_agg = _aggregate_numeric_by_nodes_mode(
+            _first_event_rows_per_rep(raw_rows, OSPF_HANDOVER_OUTAGE),
+            "outage_ms",
         )
+        sdn_agg = _aggregate_numeric_by_nodes_mode(
+            _first_event_rows_per_rep(raw_rows, sdn_reason),
+            "outage_ms",
+        )
+        any_data |= _plot_outage_series(
+            ax, nodes, ospf_agg, mode="ospf",
+            label="OSPF (topology change, 1st handover)",
+        )
+        any_data |= _plot_outage_series(
+            ax, nodes, sdn_agg, mode="sdn",
+            label=f"SDN ({sdn_reason.replace('_', ' ')}, 1st handover)",
+        )
+    else:
+        series = [
+            ("ospf", OSPF_HANDOVER_OUTAGE, "OSPF (topology change)"),
+            ("sdn", sdn_reason, f"SDN ({sdn_reason.replace('_', ' ')})"),
+        ]
+        for mode, reason, label in series:
+            xs, ys, yerr = [], [], []
+            for n in nodes:
+                match = _filter(rows, nodes=str(n), mode=mode, reason=reason)
+                if not match:
+                    continue
+                row = match[0]
+                mean = _float(row.get("outage_ms_mean"))
+                if mean is None:
+                    continue
+                std = _float(row.get("outage_ms_std")) or 0.0
+                mean_s = mean / 1000.0
+                std_s = std / 1000.0
+                xs.append(n)
+                ys.append(mean_s)
+                yerr.append(_clip_lower_yerr(mean_s, std_s))
+            if not xs:
+                continue
+            any_data = True
+            ax.errorbar(
+                xs, ys, yerr=yerr, marker="o", capsize=4, linewidth=2,
+                label=label, color=MODE_COLORS.get(mode, None),
+            )
 
     if not any_data:
         plt.close(fig)
@@ -195,12 +315,19 @@ def plot_outage_vs_nodes(
 
     ax.set_xlabel("Constellation size (nodes)")
     ax.set_ylabel("Data-plane outage at handover (s)")
-    ax.set_title("Handover black-hole duration (continuous probe)")
+    ax.set_title("Handover black-hole duration — first handover per run")
     ax.set_ylim(bottom=0)
     ax.legend()
     ax.grid(True, alpha=0.3)
     if len(nodes) > 1:
         ax.set_xticks(nodes)
+    fig.text(
+        0.5, -0.06,
+        "Uses earliest handover event per rep (avoids pooling later handovers "
+        "near simulation end).",
+        ha="center", fontsize=8, style="italic",
+    )
+    fig.tight_layout()
     return _save_figure(fig, out_dir, "outage_vs_nodes", dpi)
 
 
@@ -212,13 +339,17 @@ RECOVERY_TIME = 10
 def _aggregate_outage_raw(
     rows: List[dict],
     time_index: int,
+    *,
+    use_median: bool = False,
 ) -> Dict[Tuple[str, str], Tuple[float, float]]:
-    """Return {(nodes, mode): (mean_ms, std_ms)} for one damage/recovery tick."""
+    """Return {(nodes, mode): (center_ms, spread_ms)} for one damage/recovery tick."""
     grouped: Dict[Tuple[str, str], List[float]] = defaultdict(list)
     for row in rows:
         if row.get("reason") != DAMAGE_RECOVERY:
             continue
         if _int(row.get("time_index")) != time_index:
+            continue
+        if _truthy(row.get("still_down")):
             continue
         val = _float(row.get("outage_ms"))
         if val is None:
@@ -227,9 +358,13 @@ def _aggregate_outage_raw(
 
     out: Dict[Tuple[str, str], Tuple[float, float]] = {}
     for key, values in grouped.items():
-        mean = statistics.fmean(values)
-        std = statistics.stdev(values) if len(values) >= 2 else 0.0
-        out[key] = (mean, std)
+        if use_median:
+            center = statistics.median(values)
+            spread = _spread(values, use_median=True)
+        else:
+            center = statistics.fmean(values)
+            spread = _spread(values, use_median=False)
+        out[key] = (center, spread)
     return out
 
 
@@ -276,10 +411,11 @@ def plot_outage_damage_recovery(
     dpi: int,
 ) -> Optional[List[str]]:
     """
-    Side-by-side damage (t=5) vs link recovery (t=10) data-plane outage.
+    Link damage (t=5) vs recovery (t=10) data-plane outage.
 
-    The pooled ``damage_recovery`` summary mixed two different events; this
-    figure keeps them separate.
+    Uses median ± MAD per rep (robust to outlier reps).  SDN pushes a full
+    FIB reinstall after damage; OSPF converges locally — not comparable to
+    proactive handover (see outage_vs_nodes).
     """
     plt = _import_matplotlib()
     nodes = sorted({
@@ -290,17 +426,17 @@ def plot_outage_damage_recovery(
         print("  skip outage_damage_recovery: no raw damage_recovery rows")
         return None
 
-    damage_agg = _aggregate_outage_raw(raw_rows, DAMAGE_TIME)
-    recovery_agg = _aggregate_outage_raw(raw_rows, RECOVERY_TIME)
+    damage_agg = _aggregate_outage_raw(raw_rows, DAMAGE_TIME, use_median=True)
+    recovery_agg = _aggregate_outage_raw(raw_rows, RECOVERY_TIME, use_median=True)
 
-    fig, axes = plt.subplots(1, 2, figsize=(11, 4.5), sharey=True)
+    fig, axes = plt.subplots(1, 2, figsize=(11, 4.8), sharey=True)
     left_ok = _plot_outage_panel(
         axes[0], damage_agg, nodes,
-        title=f"Link damage (t={DAMAGE_TIME})",
+        title=f"Link damage (t={DAMAGE_TIME}) — median per rep",
     )
     right_ok = _plot_outage_panel(
         axes[1], recovery_agg, nodes,
-        title=f"Link recovery (t={RECOVERY_TIME})",
+        title=f"Link recovery (t={RECOVERY_TIME}) — median per rep",
     )
 
     if not left_ok and not right_ok:
@@ -311,8 +447,15 @@ def plot_outage_damage_recovery(
     axes[0].set_ylabel("Data-plane outage (s)")
     axes[1].legend(loc="best")
     fig.suptitle(
-        "Damage vs recovery: data-plane black-hole duration (continuous probe)",
-        y=1.02,
+        "Link failure scenario (not handover): SDN full FIB reinstall vs OSPF local convergence",
+        y=1.04, fontsize=11,
+    )
+    fig.text(
+        0.5, -0.02,
+        "SDN outage during damage includes centralized route push to all containers; "
+        "proactive handover uses incremental install with zero black hole (outage_vs_nodes). "
+        "Recovery (right) shows both modes after the link is restored.",
+        ha="center", fontsize=8, style="italic", wrap=True,
     )
     fig.tight_layout()
     return _save_figure(fig, out_dir, "outage_damage_recovery", dpi)
@@ -346,15 +489,22 @@ def _plot_by_phase(
         1, len(phases), figsize=(3.2 * len(phases), 4.2),
         sharey=True, squeeze=False,
     )
+    mode_style = {
+        "ospf": {"marker": "o", "zorder": 3, "linewidth": 2.0, "markersize": 6},
+        "sdn": {"marker": "s", "zorder": 2, "linewidth": 1.5, "markersize": 5},
+    }
     any_data = False
     for ax, phase in zip(axes[0], phases):
-        for mode in ("ospf", "sdn"):
+        # SDN first, OSPF on top so overlapping lines remain visible.
+        for mode in ("sdn", "ospf"):
             xs, ys, yerr = [], [], []
             for n in nodes:
                 match = _filter(rows, nodes=str(n), mode=mode, phase=phase)
                 if not match:
                     continue
                 row = match[0]
+                if not _ping_phase_plottable(row, mean_key):
+                    continue
                 mean = _float(row.get(mean_key))
                 if mean is None:
                     continue
@@ -365,8 +515,11 @@ def _plot_by_phase(
             if not xs:
                 continue
             any_data = True
+            style = mode_style[mode]
             ax.errorbar(
-                xs, ys, yerr=yerr, marker="o", capsize=3, linewidth=1.5,
+                xs, ys, yerr=yerr, marker=style["marker"], capsize=3,
+                linewidth=style["linewidth"], markersize=style["markersize"],
+                zorder=style["zorder"],
                 label=MODE_LABELS[mode], color=MODE_COLORS[mode],
             )
         ax.set_title(phase.replace("_", " "))
@@ -426,50 +579,84 @@ def plot_control_handover(
     rows: List[dict],
     out_dir: str,
     dpi: int,
+    control_raw_rows: Optional[List[dict]] = None,
 ) -> Optional[List[str]]:
     """
-    Handover control-plane cost: grouped bars (log scale).
+    Handover control-plane cost at first handover per rep (log scale).
 
     OSPF ``time_ms`` is route-dump collection time (~10² ms). SDN splits into
-    Dijkstra compute (~10⁰ ms) and docker-exec install (~10³ ms). A stacked bar
-    hid compute entirely; log-scale grouped bars keep all three visible.
+    Dijkstra compute (~10⁰ ms) and docker-exec install (~10³–10⁴ ms).
     """
     plt = _import_matplotlib()
     import numpy as np
 
-    nodes = _sorted_nodes(rows)
+    nodes = _sorted_nodes(rows if control_raw_rows is None else control_raw_rows)
     if not nodes:
         print("  skip control_handover: no node data")
         return None
-
-    sdn_reasons = {r.get("reason") for r in rows if r.get("mode") == "sdn"}
-    sdn_reason = (
-        SDN_HANDOVER_INSTALL if SDN_HANDOVER_INSTALL in sdn_reasons
-        else SDN_HANDOVER_OUTAGE_FALLBACK
-    )
 
     ospf_y, ospf_err = [], []
     compute_y, install_y = [], []
     plot_nodes: List[int] = []
 
-    for n in nodes:
-        ospf_row = _filter(rows, nodes=str(n), mode="ospf", reason=OSPF_HANDOVER_OUTAGE)
-        sdn_row = _filter(rows, nodes=str(n), mode="sdn", reason=sdn_reason)
-        if not ospf_row and not sdn_row:
-            continue
-        plot_nodes.append(n)
-        if ospf_row:
-            ospf_y.append(_float(ospf_row[0].get("time_ms_mean")) or np.nan)
-            ospf_err.append(_float(ospf_row[0].get("time_ms_std")) or 0.0)
-        else:
-            ospf_y.append(np.nan)
-            ospf_err.append(0.0)
-        if sdn_row:
-            compute_y.append(_float(sdn_row[0].get("compute_ms_mean")) or np.nan)
-            install_y.append(_float(sdn_row[0].get("install_ms_mean")) or np.nan)
-        else:
-            compute_y.append(np.nan)
-            install_y.append(np.nan)
+    if control_raw_rows:
+        ospf_agg = _aggregate_numeric_by_nodes_mode(
+            _first_event_rows_per_rep(control_raw_rows, OSPF_HANDOVER_OUTAGE),
+            "time_ms",
+            skip_still_down=False,
+        )
+        sdn_first = _first_event_rows_per_rep(
+            control_raw_rows, SDN_HANDOVER_INSTALL)
+        compute_agg = _aggregate_numeric_by_nodes_mode(
+            sdn_first, "compute_ms", skip_still_down=False,
+        )
+        install_agg = _aggregate_numeric_by_nodes_mode(
+            sdn_first, "install_ms", skip_still_down=False,
+        )
+        for n in nodes:
+            ns = str(n)
+            ospf_key = (ns, "ospf")
+            sdn_key = (ns, "sdn")
+            if ospf_key not in ospf_agg and sdn_key not in install_agg:
+                continue
+            plot_nodes.append(n)
+            if ospf_key in ospf_agg:
+                m, s, _ = ospf_agg[ospf_key]
+                ospf_y.append(m)
+                ospf_err.append(s)
+            else:
+                ospf_y.append(np.nan)
+                ospf_err.append(0.0)
+            if sdn_key in compute_agg:
+                compute_y.append(compute_agg[sdn_key][0])
+                install_y.append(install_agg.get(sdn_key, (np.nan, 0, 0))[0])
+            else:
+                compute_y.append(np.nan)
+                install_y.append(np.nan)
+    else:
+        sdn_reasons = {r.get("reason") for r in rows if r.get("mode") == "sdn"}
+        sdn_reason = (
+            SDN_HANDOVER_INSTALL if SDN_HANDOVER_INSTALL in sdn_reasons
+            else SDN_HANDOVER_OUTAGE_FALLBACK
+        )
+        for n in nodes:
+            ospf_row = _filter(rows, nodes=str(n), mode="ospf", reason=OSPF_HANDOVER_OUTAGE)
+            sdn_row = _filter(rows, nodes=str(n), mode="sdn", reason=sdn_reason)
+            if not ospf_row and not sdn_row:
+                continue
+            plot_nodes.append(n)
+            if ospf_row:
+                ospf_y.append(_float(ospf_row[0].get("time_ms_mean")) or np.nan)
+                ospf_err.append(_float(ospf_row[0].get("time_ms_std")) or 0.0)
+            else:
+                ospf_y.append(np.nan)
+                ospf_err.append(0.0)
+            if sdn_row:
+                compute_y.append(_float(sdn_row[0].get("compute_ms_mean")) or np.nan)
+                install_y.append(_float(sdn_row[0].get("install_ms_mean")) or np.nan)
+            else:
+                compute_y.append(np.nan)
+                install_y.append(np.nan)
 
     if not plot_nodes:
         print("  skip control_handover: no control rows")
@@ -500,7 +687,7 @@ def plot_control_handover(
     ax.set_yscale("log")
     ax.set_ylabel("Control-plane time at handover (ms, log scale)")
     ax.set_xlabel("Constellation size (nodes)")
-    ax.set_title("Handover control-plane cost")
+    ax.set_title("Handover control-plane cost (first handover per run)")
     ax.set_xticks(x)
     ax.set_xticklabels([str(n) for n in plot_nodes])
     ax.legend(loc="upper left")
@@ -525,9 +712,12 @@ def plot_control_handover(
                 )
 
     fig.text(
-        0.5, -0.02,
-        "OSPF has no explicit install step; data-plane impact is in outage_vs_nodes.",
-        ha="center", fontsize=8, style="italic",
+        0.5, -0.08,
+        "OSPF has no route-install step (route dump only, ~10² ms). "
+        "SDN install (docker-exec push, ~10³–10⁴ ms) dominates control-plane time "
+        "but keeps the data plane up during proactive handover — see outage_vs_nodes "
+        "(0 s black hole vs multi-second OSPF gaps).",
+        ha="center", fontsize=8, style="italic", wrap=True,
     )
     fig.tight_layout()
     return _save_figure(fig, out_dir, "control_handover", dpi)
@@ -537,32 +727,49 @@ def plot_routes_installed_handover(
     rows: List[dict],
     out_dir: str,
     dpi: int,
+    control_raw_rows: Optional[List[dict]] = None,
 ) -> Optional[List[str]]:
-    """Routes pushed at handover (SDN installed_mean vs FIB scale)."""
+    """Routes pushed at first handover per rep (SDN incremental install)."""
     plt = _import_matplotlib()
-    nodes = _sorted_nodes(rows)
-    sdn_rows = [
-        r for r in rows
-        if r.get("mode") == "sdn" and r.get("reason") == SDN_HANDOVER_INSTALL
-    ]
-    if not sdn_rows:
-        sdn_rows = _filter(rows, mode="sdn", reason=SDN_HANDOVER_OUTAGE_FALLBACK)
-    if not sdn_rows or not nodes:
-        print("  skip routes_installed_handover: no SDN handover install rows")
+    nodes = _sorted_nodes(rows if control_raw_rows is None else control_raw_rows)
+    if not nodes:
+        print("  skip routes_installed_handover: no node data")
         return None
 
     fig, ax = plt.subplots(figsize=(7, 4.5))
     xs, ys, yerr = [], [], []
-    for n in nodes:
-        match = [r for r in sdn_rows if _int(r.get("nodes")) == n]
-        if not match:
-            continue
-        mean = _float(match[0].get("installed_mean"))
-        if mean is None:
-            continue
-        xs.append(n)
-        ys.append(mean)
-        yerr.append(_float(match[0].get("installed_std")) or 0.0)
+
+    if control_raw_rows:
+        first = _first_event_rows_per_rep(
+            control_raw_rows, SDN_HANDOVER_INSTALL)
+        agg = _aggregate_numeric_by_nodes_mode(
+            first, "installed", skip_still_down=False,
+        )
+        for n in nodes:
+            key = (str(n), "sdn")
+            if key not in agg:
+                continue
+            mean, std, _count = agg[key]
+            xs.append(n)
+            ys.append(mean)
+            yerr.append(std)
+    else:
+        sdn_rows = [
+            r for r in rows
+            if r.get("mode") == "sdn" and r.get("reason") == SDN_HANDOVER_INSTALL
+        ]
+        if not sdn_rows:
+            sdn_rows = _filter(rows, mode="sdn", reason=SDN_HANDOVER_OUTAGE_FALLBACK)
+        for n in nodes:
+            match = [r for r in sdn_rows if _int(r.get("nodes")) == n]
+            if not match:
+                continue
+            mean = _float(match[0].get("installed_mean"))
+            if mean is None:
+                continue
+            xs.append(n)
+            ys.append(mean)
+            yerr.append(_float(match[0].get("installed_std")) or 0.0)
 
     if not xs:
         plt.close(fig)
@@ -575,11 +782,17 @@ def plot_routes_installed_handover(
     )
     ax.set_xlabel("Constellation size (nodes)")
     ax.set_ylabel("Kernel routes pushed")
-    ax.set_title("Incremental install size at handover")
+    ax.set_title("Incremental install size at first handover per run")
     ax.legend()
     ax.grid(True, alpha=0.3)
     if len(nodes) > 1:
         ax.set_xticks(nodes)
+    fig.text(
+        0.5, -0.06,
+        "First proactive_handover event per rep (earliest time_index).",
+        ha="center", fontsize=8, style="italic",
+    )
+    fig.tight_layout()
     return _save_figure(fig, out_dir, "routes_installed_handover", dpi)
 
 
@@ -603,21 +816,33 @@ def generate_figures(
     print(f"Output:  {out_dir}")
 
     written: List[str] = []
+    raw_path = os.path.join(results_dir, OUTAGE_RAW)
+    raw_rows: Optional[List[dict]] = None
+    if os.path.isfile(raw_path):
+        raw_rows = read_table(
+            raw_path,
+            ["nodes", "mode", "reason", "time_index", "outage_ms", "still_down"],
+        )
+
+    control_raw_path = os.path.join(results_dir, CONTROL_RAW)
+    control_raw_rows: Optional[List[dict]] = None
+    if os.path.isfile(control_raw_path):
+        control_raw_rows = read_table(
+            control_raw_path,
+            ["nodes", "mode", "rep", "time_index", "reason",
+             "time_ms", "compute_ms", "install_ms", "installed"],
+        )
+
     if "outage" in summaries:
         rows = read_table(
             summaries["outage"],
             ["nodes", "mode", "reason", "outage_ms_mean", "outage_ms_std"],
         )
-        paths = plot_outage_vs_nodes(rows, out_dir, dpi)
+        paths = plot_outage_vs_nodes(rows, out_dir, dpi, raw_rows=raw_rows)
         if paths:
             written.extend(paths)
 
-    raw_path = os.path.join(results_dir, OUTAGE_RAW)
-    if os.path.isfile(raw_path):
-        raw_rows = read_table(
-            raw_path,
-            ["nodes", "mode", "reason", "time_index", "outage_ms"],
-        )
+    if raw_rows:
         paths = plot_outage_damage_recovery(raw_rows, out_dir, dpi)
         if paths:
             written.extend(paths)
@@ -642,10 +867,16 @@ def generate_figures(
              "compute_ms_mean", "install_ms_mean", "installed_mean",
              "installed_std"],
         )
-        for plot_fn in (plot_control_handover, plot_routes_installed_handover):
-            paths = plot_fn(rows, out_dir, dpi)
-            if paths:
-                written.extend(paths)
+        paths = plot_control_handover(
+            rows, out_dir, dpi, control_raw_rows=control_raw_rows,
+        )
+        if paths:
+            written.extend(paths)
+        paths = plot_routes_installed_handover(
+            rows, out_dir, dpi, control_raw_rows=control_raw_rows,
+        )
+        if paths:
+            written.extend(paths)
 
     if not written:
         raise RuntimeError(
