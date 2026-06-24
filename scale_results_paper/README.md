@@ -8,9 +8,11 @@ Run **one grid size at a time** (10 reps each), then plot when all sizes are don
 make paper-clean          # optional: wipe CSVs only
 make paper-5x5            # first size (no --append)
 make paper-6x6            # appends into this directory
-# … 7x7, 8x8, 9x9, 10x10
+# … 7x7, 8x8 (400s duration), 9x9, 10x10
 make paper-plots          # figures → ./figures
 ```
+
+Re-run `make paper-8x8` if 8×8 steady/handover data was truncated (needs 400s sim).
 
 CSV outputs (`ping_raw.csv`, `outage_summary.csv`, …) are gitignored; this README is tracked.
 
