@@ -117,9 +117,9 @@ paper-7x7: paper-init ## 7×7 × PAPER_REPS; append
 	$(PYTHON) experiments/compare_batch.py --reps $(PAPER_REPS) \
 		--sizes 7x7 --durations 7x7=250 --out-dir $(PAPER_OUT) --append
 
-paper-8x8: paper-init ## 8×8 × PAPER_REPS; append
+paper-8x8: paper-init ## 8×8 × PAPER_REPS; append (400s — room for 3 handovers)
 	$(PYTHON) experiments/compare_batch.py --reps $(PAPER_REPS) \
-		--sizes 8x8 --durations 8x8=300 --out-dir $(PAPER_OUT) --append
+		--sizes 8x8 --durations 8x8=400 --out-dir $(PAPER_OUT) --append
 
 paper-9x9: paper-init ## 9×9 × PAPER_REPS; append
 	$(PYTHON) experiments/compare_batch.py --reps $(PAPER_REPS) \
