@@ -12,9 +12,12 @@ from experiments.plot_results import (  # noqa: E402
     OUTAGE_RAW,
     PING_BY_PHASE,
     CONTROL_BY_REASON,
+    CONTROL_RAW,
     discover_results_dir,
     generate_figures,
     read_table,
+    _first_event_rows_per_rep,
+    _ping_phase_plottable,
 )
 
 
@@ -48,6 +51,11 @@ def test_generate_figures_from_minimal_csvs(tmp_path):
     _write_csv(
         tmp_path / OUTAGE_RAW,
         "mode,profile,nodes,rep,seed,reason,time_index,event,outage_ms,still_down",
+        "ospf,full,27,1,1001,topology_change,53,topology_change@t53,5000.0,False",
+        "ospf,full,27,1,1001,topology_change,80,topology_change@t80,90000.0,True",
+        "sdn,full,27,1,1001,proactive_handover,53,proactive_handover@t53,0.0,False",
+        "ospf,full,38,1,1001,topology_change,23,topology_change@t23,5200.0,False",
+        "sdn,full,38,1,1001,proactive_handover,23,proactive_handover@t23,0.0,False",
         "ospf,full,27,1,1001,damage_recovery,5,damage_recovery@t5,6000.0,False",
         "ospf,full,27,1,1001,damage_recovery,10,damage_recovery@t10,0.0,False",
         "sdn,full,27,1,1001,damage_recovery,5,damage_recovery@t5,12000.0,False",
@@ -65,6 +73,21 @@ def test_generate_figures_from_minimal_csvs(tmp_path):
         "27,sdn,handover,1,0,0,30.0,0,1",
         "38,ospf,post_handover,1,100,0,,,0",
         "38,sdn,post_handover,1,0,0,29.0,0,1",
+        "66,ospf,steady,10,100,0,,,0",
+        "66,sdn,steady,10,100,0,,,0",
+    )
+    _write_csv(
+        tmp_path / CONTROL_RAW,
+        "mode,profile,nodes,rep,seed,time_index,reason,event,time_ms,"
+        "compute_ms,install_ms,routing_event,installed,fib_unchanged",
+        "ospf,full,27,1,1001,53,topology_change,topology_change@t53,250.0,,,True,,",
+        "sdn,full,27,1,1001,53,proactive_handover,proactive_handover@t53,"
+        "5000.0,2.0,4998.0,True,150,False",
+        "sdn,full,27,1,1001,80,proactive_handover,proactive_handover@t80,"
+        "9000.0,2.0,8998.0,True,5,False",
+        "ospf,full,38,1,1001,23,topology_change,topology_change@t23,240.0,,,True,,",
+        "sdn,full,38,1,1001,23,proactive_handover,proactive_handover@t23,"
+        "5300.0,3.0,5297.0,True,164,False",
     )
     _write_csv(
         tmp_path / CONTROL_BY_REASON,
@@ -87,6 +110,27 @@ def test_generate_figures_from_minimal_csvs(tmp_path):
     assert "routes_installed_handover" in stems
     for p in paths:
         assert os.path.getsize(p) > 0
+
+
+def test_first_event_rows_per_rep_prefers_earliest():
+    rows = [
+        {"nodes": "27", "mode": "sdn", "rep": "1", "time_index": "80",
+         "reason": "proactive_handover", "installed": "5"},
+        {"nodes": "27", "mode": "sdn", "rep": "1", "time_index": "53",
+         "reason": "proactive_handover", "installed": "150"},
+    ]
+    picked = _first_event_rows_per_rep(rows, "proactive_handover")
+    assert len(picked) == 1
+    assert picked[0]["time_index"] == "53"
+    assert picked[0]["installed"] == "150"
+
+
+def test_ping_phase_plottable_skips_truncated_steady():
+    row = {"phase": "steady", "loss_mean_pct": "100", "n_rtt_samples": "0",
+           "rtt_mean_ms": ""}
+    assert not _ping_phase_plottable(row, "rtt_mean_ms")
+    row["n_rtt_samples"] = "10"
+    assert not _ping_phase_plottable(row, "rtt_mean_ms")
 
 
 def test_discover_results_dir(tmp_path):
