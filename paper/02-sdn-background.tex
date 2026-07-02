@@ -1,9 +1,9 @@
 % Background on Software Defined Networking.
 
-\section{SDN --- Software Defined Networking}
+\section{Software Defined Networking}
 \label{sec:sdn}
 
-Software Defined Networking (SDN)~\cite{10.1145/1355734.1355746} decouples the
+Software defined networking (SDN)~\cite{10.1145/1355734.1355746} decouples the
 \emph{control plane} (routing decisions, topology policy, admission rules) from
 the \emph{data plane} (packet forwarding on switches and routers).
 In a traditional network each device runs distributed control software and
@@ -12,7 +12,7 @@ forwards according to locally derived state; in SDN, a logically centralized
 forwarding tables on the data plane through a southbound interface such as
 OpenFlow~\cite{10.1145/1355734.1355746}.
 The data plane remains responsible only for fast, deterministic packet
-processing---match, forward, enqueue---while the control plane can evolve
+processing (match, forward, enqueue), while the control plane can evolve
 independently, be updated without changing hardware, and apply consistent
 policy across many nodes in one step.
 That separation lowers operational cost, enables programmatic automation, and
