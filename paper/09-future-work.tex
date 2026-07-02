@@ -1,0 +1,89 @@
+% Future work section for OrbitGraph paper.
+
+\section{Future Work}
+\label{sec:future}
+
+Our study demonstrates that graph-centric SDN can eliminate GSL handover black
+holes on emulated constellations up to 102 nodes, but several limitations
+point to concrete extensions grouped by experimental methodology, scenario
+coverage, and path toward production-scale deployment.
+
+The largest gap between OrbitGraph's algorithmic cost and its observed
+control-plane time is kernel route install: pushing routes through per-container
+remote execution dominates handover and damage events
+(Section~\ref{sec:analysis-control}).
+Replacing this harness with a production-style southbound (gRPC or NETCONF to
+on-board routing agents, compressed delta messages, or batched OpenFlow-style
+flow mods) would isolate the true cost of centralized programming from container
+overhead and likely improve damage-recovery performance
+(Section~\ref{sec:analysis-damage}), where install latency currently outweighs
+the benefit of global recomputation.
+Our synchronous StarryNet loop blocks while routes are installed, which
+inflates outage measurements for reactive events even when forwarding is
+partially preserved; running the controller asynchronously and aligning probes
+to wall-clock control-plane timestamps only would yield a fairer comparison with
+distributed protocols whose reconvergence also proceeds concurrently with
+forwarding attempts.
+The present campaign uses ICMP probes between two ground stations; adding
+sustained TCP/QUIC flows, multipath traffic matrices, and application-level
+quality-of-service metrics would test whether zero handover outage translates
+into throughput and goodput gains under realistic load, not only reachability.
+Ten repetitions per grid size stabilize mean and standard deviation for our
+scaling study, but seed sensitivity (especially for random satellite damage)
+warrants wider confidence intervals and, where feasible, non-parametric tests
+across the full $5{\times}5$–$10{\times}10$ matrix.
+
+Each run captures the first GSL handover by design.
+Mega-constellations experience continuous contact churn; emulating multi-hour
+windows with dozens of handovers per ground station would reveal whether
+incremental baselines stay consistent and whether error accumulation in address
+caches or route-key bookkeeping appears over time.
+We use a single autonomous system with two fixed ground stations and
+LeastDelay intra-domain routing.
+Extending to multi-AS topologies with BGP peering at gateways, or to
+ground-relay architectures that offload long-haul traffic to terrestrial
+fiber~\cite{handley:ground-relays:2019}, would test OrbitGraph where path
+selection crosses administrative boundaries and not every edge weight comes
+from propagation delay alone.
+OrbitGraph proactive handover is complementary to distributed protocols that
+exploit ephemeris; a head-to-head study against OPSPF~\cite{pam:opspf:2019} or
+segment-routing policies on the same StarryNet topologies would clarify when
+centralized install wins over orbit-predictive link-state flooding, and whether
+hybrid designs (OSPF data plane with SDN-triggered make-before-break at handover
+ticks) capture most of the benefit with less operational coupling.
+Future scenarios could include capacity-aware weighting (not only delay),
+time-varying demand hotspots, partial link degradation (elevated loss without
+total failure), and targeted ISL failures rather than whole-satellite blackouts.
+Section~\ref{sec:analysis-damage} shows OrbitGraph lagging OSPF after
+30\% satellite loss because updates are reactive and bulk; promising directions
+include precomputed backup next-hops for known failure domains, staged install
+(restore connectivity to ground first, then refine intra-orbit paths), and soft
+damage detection that triggers recomputation before total link loss.
+
+Container emulation allocates one Linux network stack per node; our workstation
+campaign tops out near 102 nodes before memory and CPU become limiting factors,
+consistent with observations in the StarryNet literature~\cite{lai2023starrynet}.
+Reaching Starlink-class scale (thousands of satellites) requires a tiered
+strategy: partition the constellation into orbital planes or regions and run
+OrbitGraph per partition with border-route summarization at domain
+gateways~\cite{gregory:satellite-routing:2022}; shard containers across hosts
+using StarryNet's distributed deployment mode; or combine packet-level emulation
+on a representative subgraph with flow-level simulators such as
+Hypatia~\cite{kassing2020exploring} or StarPerf~\cite{lai2020starperf} for
+full-constellation stress tests, using the same $G_t$ abstraction in both tiers.
+Our grids use Walker-style $O{\times}S$ layouts with Starlink-inspired altitude
+and inclination but not live two-line element feeds; feeding OrbitGraph with
+public ephemeris or operator-published contact schedules would validate proactive
+handover against real handover cadences and eclipse intervals.
+Emulation proves semantics; hardware proves timing under RF and processing
+constraints; porting the OrbitGraph controller to a small software-defined radio
+or satellite testbed would push routes to Linux routers that mirror the kernel
+FIB programming path validated here, before any on-orbit trial.
+
+Closing the install-time gap, broadening workloads and failure models, and
+climbing the scaling ladder through hierarchy and hybrid simulation are the
+main levers to move from proof-of-concept to operator-relevant deployment.
+The core idea, treating the LEO network as a sequence of graphs, computing
+shortest paths centrally, and timing delta installs against known topology
+events, remains unchanged; future work fills in the engineering surround
+that our current emulation study deliberately simplified.
