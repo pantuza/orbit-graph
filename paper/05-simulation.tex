@@ -4,15 +4,13 @@
 \label{sec:simulation}
 
 Evaluating routing under realistic LEO dynamics requires a platform that can
-(i) evolve topology and link delays as satellites move,
-(ii) exercise real intra-domain routing or an equivalent control-plane install
-path, and
-(iii) exchange packets end-to-end with measurable latency and loss.
+evolve topology and link delays as satellites move, exercise real intra-domain
+routing or an equivalent control-plane install path, and exchange packets
+end-to-end with measurable latency and loss.
 We surveyed representative LEO simulators and emulators following a recent
-ns-3-based framework review~\cite{manzanareslopez2025comprehensive} and our
-project evaluation notes.
+ns-3-based framework review~\cite{manzanareslopez2025comprehensive}.
 Table~\ref{tab:simulators} summarizes the alternatives we considered; we adopt
-\textbf{StarryNet}~\cite{lai2023starrynet} for the experiments in this paper.
+StarryNet~\cite{lai2023starrynet} for the experiments in this paper.
 
 \begin{table}[t]
   \centering
@@ -32,13 +30,12 @@ Table~\ref{tab:simulators} summarizes the alternatives we considered; we adopt
   \end{tabular}
   \\[0.5em]
   \footnotesize
-  ``Real routing'': distributed protocols (e.g., OSPF) or kernel FIB install on
+  Real routing: distributed protocols (e.g., OSPF) or kernel FIB install on
   emulated nodes, not precomputed abstract paths alone.
 \end{table}
 
 \subsection{Candidate platforms and selection rationale}
 
-\paragraph{SILLEO-SCNS.}
 SILLEO-SCNS (Simulator for Large LEO Satellite Communication
 Networks)~\cite{kempton2020silleo} focuses on constellation generation, orbital
 motion, and inter-satellite connectivity modeling.
@@ -46,10 +43,9 @@ It offers strong topology visualization and scales well for studying link
 geometry.
 However, it does not perform packet-level network simulation: there is no
 end-to-end traffic exchange through a real or emulated protocol stack, so it
-cannot directly measure RTT, jitter, or sustained data-plane outage around
-routing events---metrics central to our OrbitGraph evaluation.
+cannot directly measure round-trip time (RTT), jitter, or sustained data-plane
+outage around routing events, metrics central to our OrbitGraph evaluation.
 
-\paragraph{Hypatia.}
 Hypatia~\cite{kassing2020exploring} integrates precomputed orbital state with
 the ns-3 discrete-event simulator and supports packet-level experiments at LEO
 scale.
@@ -63,7 +59,6 @@ In addition, full ns-3 campaign runtimes reported in the literature are
 substantially longer than container emulation for comparable scenario
 complexity.
 
-\paragraph{LEOPath.}
 LEOPath~\cite{leopath2024} is a Python framework for analyzing and comparing
 routing algorithms over time-varying LEO graphs.
 It is more extensible than static shortest-path pipelines and targets routing
@@ -73,9 +68,7 @@ through kernel forwarding; routing decisions are evaluated in a custom
 simulation core rather than against live TCP/IP stacks and real handover
 timing on emulated links.
 
-\paragraph{StarPerf (StarPath).}
-StarPerf~\cite{lai2020starperf}, sometimes referred to as StarPath in
-community repositories, improves on Hypatia-style workflows with faster
+StarPerf~\cite{lai2020starperf} improves on Hypatia-style workflows with faster
 area-to-area performance profiling and constellation scaling.
 It excels at statistical characterization of mega-constellation design
 trade-offs under abstract traffic models.
@@ -84,21 +77,20 @@ emulated nodes; custom routing algorithms are evaluated in a flow- or
 performance-oriented model rather than through kernel routes installed before
 a ground--satellite link teardown.
 
-\paragraph{StarryNet (chosen).}
 StarryNet~\cite{lai2023starrynet} emulates integrated space--terrestrial
 networks with Docker containers and Linux traffic control.
 Each satellite and ground station runs in its own container; inter-satellite
 and ground--satellite links are Docker bridge networks whose propagation delay,
-loss, and bandwidth are enforced with \texttt{tc netem} in the Linux kernel.
+loss, and bandwidth are enforced with Linux traffic control in the kernel.
 Orbital motion is driven by SGP4-based ephemerides; per-second delay matrices
-and a \texttt{Topo\_leo\_change} schedule capture continuous topology drift
+and a precomputed topology-change schedule capture continuous topology drift
 and GSL handovers.
-Crucially for our study, StarryNet supports \emph{real} intra-domain routing:
+Crucially for our study, StarryNet supports real intra-domain routing:
 the baseline runs BIRD with OSPF, while our OrbitGraph controller installs
-kernel static routes via \texttt{ip route replace}---the same data plane a
+kernel static routes via atomic replace operations, the same data plane a
 centralized SDN deployment would program, without modifying application code.
-End-to-end probes (\texttt{ping}, continuous outage sampling) traverse the
-actual forwarding path, so control-plane actions are reflected in measurable
+End-to-end probes and continuous outage sampling traverse the actual
+forwarding path, so control-plane actions are reflected in measurable
 data-plane availability.
 
 We therefore use StarryNet as the evaluation harness: it is the only surveyed
@@ -110,9 +102,9 @@ experiments on identical emulated graphs.
 
 Within StarryNet we configure Walker-style $O \times S$ grids with plus-grid
 inter-satellite links, two fixed ground stations, LeastDelay link selection,
-550\,km altitude, and 53$^\circ$ inclination---representative of published
+550\,km altitude, and 53$^\circ$ inclination, representative of published
 Starlink-class parameters.
-Each node is a privileged Linux container (\texttt{lwsen/starlab\_node:1.0});
+Each node is a privileged Linux container from the published StarryNet image;
 ISLs and GSLs appear and disappear according to the precomputed topology
 change log, while delay matrices refresh every 10\,s to reflect orbital motion.
 The emulation loop executes in wall-clock time: routing events (damage,
