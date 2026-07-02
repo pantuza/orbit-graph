@@ -1,0 +1,31 @@
+% Background on Software Defined Networking.
+
+\section{SDN --- Software Defined Networking}
+\label{sec:sdn}
+
+Software Defined Networking (SDN)~\cite{10.1145/1355734.1355746} decouples the
+\emph{control plane} (routing decisions, topology policy, admission rules) from
+the \emph{data plane} (packet forwarding on switches and routers).
+In a traditional network each device runs distributed control software and
+forwards according to locally derived state; in SDN, a logically centralized
+\emph{controller} maintains a global view of the network and programs
+forwarding tables on the data plane through a southbound interface such as
+OpenFlow~\cite{10.1145/1355734.1355746}.
+The data plane remains responsible only for fast, deterministic packet
+processing---match, forward, enqueue---while the control plane can evolve
+independently, be updated without changing hardware, and apply consistent
+policy across many nodes in one step.
+That separation lowers operational cost, enables programmatic automation, and
+allows researchers and operators to experiment with new routing and management
+logic without replacing every network element.
+
+A natural way to give the controller that global view is to represent the
+network as a \emph{graph}: vertices are hosts, switches, and links; edges
+encode connectivity and weights such as delay or capacity.
+Graphs provide a unified structure on which to run management algorithms
+(shortest path, spanning tree, coloring) and to notify applications when
+topology changes~\cite{7014202}.
+OrbitGraph (Section~\ref{sec:orbitgraph}) follows this graph-centric SDN
+principle for LEO constellations: the controller builds a time-varying graph
+$G_t$ from orbital snapshots, computes forwarding centrally, and pushes only
+the deltas required to keep the data plane aligned with each graph edit.

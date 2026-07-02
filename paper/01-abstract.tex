@@ -10,9 +10,9 @@ end-to-end forwarding for multiple seconds.
 We propose OrbitGraph, a graph-centric software-defined routing scheme that
 recomputes shortest paths centrally and pushes only changed kernel routes
 \emph{before} the old ground-satellite link is torn down.
-Using container-based emulation from 27 to 100 satellites, we measure control-plane
-cost and data-plane availability with a continuous outage probe aligned to
-routing events.
+Using container-based emulation from 27 to 100 satellites (including 2 ground stations), 
+we measure control-plane cost and data-plane availability with a continuous outage 
+probe aligned to routing events.
 At the first handover in each run, OrbitGraph yields 0\,ms mean data-plane outage
 while OSPF incurs multi-second black holes (up to 12.9\,s), maintains 0\% packet
 loss through the handover and post-handover phases on every grid size, and pushes

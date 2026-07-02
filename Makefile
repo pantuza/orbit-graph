@@ -11,7 +11,7 @@ DOCKER_IMAGE  = lwsen/starlab_node:1.0
 
 .PHONY: help setup install-deps docker-pull test clean clean-artifacts \
 	ospf sdn ospf_simple sdn_simple stats stats_simple compare compare_simple \
-	batch scale plots paper-init paper-clean paper-plots \
+	batch scale plots constellation-plot paper-init paper-clean paper-plots \
 	paper-5x5 paper-6x6 paper-7x7 paper-8x8 paper-9x9 paper-10x10
 
 help: ## Show this help
@@ -88,6 +88,13 @@ scale: ## Scale sweep from simulation.json (SCALE_REPS= overrides plan reps)
 
 plots: ## Journal figures from batch/scale CSVs (RESULTS=./scale_results)
 	$(PYTHON) experiments/plot_results.py --in-dir $(RESULTS) --out-dir $(FIGDIR)
+
+constellation-plot: ## Earth + LEO grid figure (ORBITS=10 SATS=10 → FIGDIR)
+	$(PYTHON) experiments/plot_constellation.py --orbits $(ORBITS) --sats $(SATS) \
+		--out-dir $(FIGDIR) --stem constellation_$(ORBITS)x$(SATS)
+
+ORBITS ?= 10
+SATS   ?= 10
 
 # ---------------------------------------------------------------------------
 # Paper scale sweep → ./scale_results_paper/*.csv (one grid per make target)
