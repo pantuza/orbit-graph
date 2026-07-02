@@ -1,5 +1,4 @@
-% Introduction (Kurose 5-paragraph structure: motivation, specific problem,
-% contributions, differences from prior work, roadmap).
+% Introduction (Kurose 5-paragraph structure).
 
 \section{Introduction}
 \label{sec:intro}
@@ -21,19 +20,20 @@ as a \emph{time-varying graph} in which inter-satellite and ground--satellite
 links (GSLs) appear and disappear on a schedule dictated by orbital
 mechanics~\cite{seong:topological-design:1995,kassing2020exploring}.
 A ground station must therefore hand its uplink from a setting satellite to a
-rising one at recurring, predictable instants---a GSL \emph{handover}.
-Distributed link-state routing such as OSPF~\cite{sidhu:ospf:1993}, the de facto
-baseline in container-based LEO emulators~\cite{lai2023starrynet}, learns each
-mutation reactively through hello timeouts and link-state flooding, and
-reconverges only \emph{after} the link change has completed.
+rising one at recurring, predictable instants, a GSL \emph{handover}.
+Distributed link-state routing such as open shortest path first
+(OSPF)~\cite{sidhu:ospf:1993}, the de facto baseline in container-based LEO
+emulators~\cite{lai2023starrynet}, learns each mutation reactively through
+hello timeouts and link-state flooding, and reconverges only \emph{after} the
+link change has completed.
 During that interval, traffic is forwarded along stale or missing next-hops and
 is silently black-holed.
 This raises the central question of this paper: since handover times are known
 in advance from orbital prediction, can routing exploit that knowledge to keep
 the data plane continuously connected across topology changes?
 
-In this paper we present \textbf{OrbitGraph}, a graph-centric, software-defined
-routing scheme for LEO constellations.
+In this paper we present OrbitGraph, a graph-centric, software-defined routing
+scheme for LEO constellations.
 OrbitGraph models each orbital snapshot as a delay-weighted graph $G_t$, computes
 all-pairs shortest paths centrally with Dijkstra's algorithm, and programs the
 kernel forwarding information base (FIB) of each node by pushing only the routes
@@ -45,28 +45,21 @@ We implement OrbitGraph on the StarryNet emulator~\cite{lai2023starrynet}, which
 runs real TCP/IP stacks and an OSPF control plane in containers, and evaluate it
 against that distributed baseline on Walker constellations from 27 to 102 nodes
 using a continuous outage probe aligned to routing events.
-Our contributions are:
-\begin{itemize}
-  \item a graph-centric SDN control model that unifies initialization, delay
-        refresh, link failure, and GSL handover as shortest-path computations
-        over a sequence of snapshots $G_t$ (Section~\ref{sec:orbitgraph});
-  \item an incremental, make-before-break FIB install that programs only changed
-        next-hops, reducing handover updates by roughly two orders of magnitude
-        relative to a full-table push;
-  \item a proactive handover mechanism that commits the new forwarding state
-        while both contacts briefly coexist; and
-  \item an empirical study showing that OrbitGraph yields \mbox{0\,ms} mean
-        data-plane outage at GSL handover where OSPF incurs multi-second black
-        holes, holds 0\% packet loss through the handover phases on every grid
-        size, and keeps shortest-path recomputation in the millisecond range,
-        while also delimiting---honestly---the regime (unplanned bulk failure)
-        where centralized install does not yet outperform distributed
-        reconvergence (Section~\ref{sec:analysis}).
-\end{itemize}
+Our contributions are fourfold: a graph-centric software-defined networking
+(SDN) control model that unifies initialization, delay refresh, link failure,
+and GSL handover as shortest-path computations over a sequence of snapshots
+$G_t$; an incremental, make-before-break FIB install that programs only changed
+next-hops, reducing handover updates by roughly two orders of magnitude relative
+to a full-table push; a proactive handover mechanism that commits the new
+forwarding state while both contacts briefly coexist; and an empirical study
+showing 0\,ms mean data-plane outage at GSL handover where OSPF incurs
+multi-second black holes, 0\% packet loss through the handover phases on every
+grid size, and millisecond-range shortest-path recomputation, together with
+measurement of the regime where centralized install does not yet outperform
+distributed reconvergence under unplanned bulk failure.
 
-OrbitGraph differs from prior LEO routing along a single, deliberate axis:
-\emph{what} forwarding state to install and \emph{when} relative to link
-lifetime.
+OrbitGraph differs from prior LEO routing along a single axis: \emph{what}
+forwarding state to install and \emph{when} relative to link lifetime.
 Snapshot and offline schemes precompute per-state tables and load them on
 board~\cite{seong:topological-design:1995}; distributed protocols optimize hop
 count or convergence speed without a global view~\cite{gregory:satellite-routing:2022,
@@ -75,16 +68,10 @@ pam:opspf:2019}; and satellite SDN research has largely targeted controller
 guo:spda:2022}.
 To our knowledge, none of these install real kernel forwarding state on emulated
 satellite nodes and measure end-to-end availability through handover under
-proactive update ordering.
-A detailed comparison appears in Section~\ref{sec:related}.
+proactive update ordering; Section~\ref{sec:related} compares these lines in
+detail.
 
-The remainder of this paper is organized as follows.
-Section~\ref{sec:sdn} reviews the software-defined and graph-centric networking
-principles OrbitGraph builds on, and Section~\ref{sec:related} positions it
-against prior work.
-Section~\ref{sec:simulation} describes the StarryNet emulation platform and
-Section~\ref{sec:orbitgraph} details the OrbitGraph design.
-Section~\ref{sec:experiments} presents the methodology and scaling study, whose
-results are analyzed in Section~\ref{sec:analysis}.
-Section~\ref{sec:future} discusses limitations and future directions, and
-Section~\ref{sec:conclusion} concludes.
+The remainder of this paper reviews software-defined and graph-centric
+networking principles, situates OrbitGraph among prior LEO routing work,
+describes the StarryNet emulation platform and OrbitGraph design, reports the
+scaling methodology and results, discusses limitations, and concludes.
