@@ -1,3 +1,57 @@
-% Main manuscript entry point (sections included from separate files).
-%
-% Title: OrbitGraph: Graph-Centric Software Defined Routing for LEO Satellite Constellations
+\documentclass[lettersize,journal]{IEEEtran}
+\usepackage{amsmath,amsfonts}
+\usepackage{algorithmic}
+\usepackage{array}
+\usepackage[caption=false,font=normalsize,labelfont=sf,textfont=sf]{subfig}
+\usepackage{textcomp}
+\usepackage{stfloats}
+\usepackage{placeins}
+\usepackage{url}
+\usepackage{verbatim}
+\usepackage{graphicx}
+\hyphenation{op-tical net-works semi-conduc-tor IEEE-Xplore}
+\def\BibTeX{{\rm B\kern-.05em{\sc i\kern-.025em b}\kern-.08em
+    T\kern-.1667em\lower.7ex\hbox{E}\kern-.125emX}}
+\usepackage{balance}
+\begin{document}
+\title{OrbitGraph: Graph-Centric Software Defined Routing for LEO Satellite Constellations}
+
+\author{\IEEEauthorblockN{
+    Gustavo Pantuza\IEEEauthorrefmark{1},
+    Luiz F. M. Vieira\IEEEauthorrefmark{1},
+    Marcos A. M. Vieira\IEEEauthorrefmark{1}
+}\\
+\IEEEauthorblockA{
+    \IEEEauthorrefmark{1}Department of Computer Science, Universidade Federal de Minas Gerais - Brazil
+}
+
+
+\thanks{Manuscript created on June, 2026; This work was developed by the LeCom laboratory from the Department of Computer Science of Federal University of Minas Gerais (UFMG).}
+}
+
+\markboth{IEEE Transactions on Computers,~Special Issue on Graph-Centric Computing}%
+{Pantuza \MakeLowercase{\textit{et al.}}: OrbitGraph: Graph-Centric Software-Defined Routing for LEO Constellations}
+
+\maketitle
+
+
+\input{01-abstract}
+\input{02-introduction}
+\input{03-sdn-background}
+\input{04-related-work}
+\input{05-simulation}
+\input{06-orbitgraph-design}
+\input{07-experiments}
+\input{08-analysis}
+\input{09-future-work}
+\input{10-conclusion}
+
+% ================ BIBLIOGRAPHY ===================
+\bibliographystyle{IEEEtran}
+\bibliography{references}
+
+\input{11-authors}
+
+\end{document}
+
+

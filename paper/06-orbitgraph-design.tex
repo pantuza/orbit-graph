@@ -7,10 +7,27 @@ LEO constellations are naturally modeled as \emph{time-varying weighted
 graphs}: satellites and ground stations are vertices, inter-satellite and
 ground--satellite links are edges whose weights shift as orbital geometry
 changes~\cite{seong:topological-design:1995,kassing2020exploring,handley:ground-relays:2019}.
+Figure~\ref{fig:constellation-10x10} shows a representative $10{\times}10$ Walker
+constellation from our scaling study, with satellites, a ground station, and the
+inter-satellite links that form the edges of this graph.
 Distributed link-state protocols such as OSPF~\cite{sidhu:ospf:1993} must
 discover each mutation through hello timeouts and link-state flooding before forwarding
 stabilizes, which creates multi-second black holes at ground--satellite (GSL)
 handovers in our baseline (Section~\ref{sec:experiments}).
+
+\begin{figure}[!h]
+  \centering
+  \includegraphics[width=\linewidth]{figures/constellation_10x10.png}
+  \caption{Representative $10{\times}10$ Walker constellation at 550\,km and
+    53$^\circ$ inclination (100 satellites, +Grid ISLs; ground station shown:
+    Belo Horizonte).
+    Orange dots: satellites; green triangle: ground station; light blue lines:
+    inter-satellite links.
+    This is the largest grid in our scaling study; smaller grids use the same
+    topology class with fewer orbital planes and satellites per plane.}
+  \label{fig:constellation-10x10}
+\end{figure}
+
 OrbitGraph takes a graph-centric, software-defined view: a centralized
 controller reads the same orbital snapshots that drive the emulator, computes
 shortest paths on the current graph, and programs the kernel forwarding
@@ -28,18 +45,6 @@ often push FIB state to edge routers.
 
 \subsection{Dynamic graph model}
 
-\begin{figure}[!t]
-  \centering
-  \includegraphics[width=\linewidth]{figures/constellation_10x10.png}
-  \caption{Representative $10{\times}10$ Walker constellation at 550\,km and
-    53$^\circ$ inclination (100 satellites, +Grid ISLs; ground station shown:
-    Belo Horizonte).
-    Orange dots: satellites; green triangle: ground station; light blue lines:
-    inter-satellite links.
-    This is the largest grid in our scaling study; smaller grids use the same
-    topology class with fewer orbital planes and satellites per plane.}
-  \label{fig:constellation-10x10}
-\end{figure}
 
 At emulation second~$t$, StarryNet provides an $N \times N$ delay matrix
 $D_t = (d_{ij})$ whose entries are one-way propagation delays (milliseconds)
@@ -49,7 +54,7 @@ We construct an undirected weighted graph
   G_t = \bigl(V,\, E_t,\, w_t\bigr),
   \label{eq:graph}
 \end{equation}
-where $V$ is the set of satellite and ground-station nodes (Fig.~\ref{fig:constellation-10x10}),
+where $V$ is the set of satellite and ground-station nodes,
 \begin{equation}
   E_t = \bigl\{ \{u,v\} \subseteq V \;\big|\;
          d_{uv} > \tau \bigr\},
@@ -129,8 +134,8 @@ The update is
 Only nodes with $\Delta_s^{+} \cup \Delta_s^{-} \neq \emptyset$ receive a
 dataplane push; unchanged entries are skipped.
 At the first GSL handover on the $10{\times}10$ grid, this reduces the install
-from ${\sim}10{,}500$ routes at initialization to ${\sim}524$ routes at
-handover, two orders of magnitude fewer programming operations while preserving
+from ${\sim}10{,}504$ routes at initialization to ${\sim}576$ routes at
+handover, roughly $20\times$ fewer programming operations while preserving
 an identical logical FIB.
 
 On delay-only ticks (matrices refresh every 10\,s as satellites move
@@ -189,10 +194,9 @@ This mirrors operator practice where a centralized controller preprograms
 forwarding for predicted contact windows rather than waiting for on-board
 protocol timers~\cite{lai2023starrynet,gregory:satellite-routing:2022}.
 
-\subsection{Why SDN fits this context}
+\subsection{SDN in the LEO context}
 
 Three properties of LEO routing make graph-centric SDN a natural match.
-
 Unlike terrestrial ad hoc networks~\cite{karp:gpsr:2000,perkins:aodv:1999},
 LEO adjacency evolves on orbital timescales with ephemeris that is accurate
 minutes to hours ahead~\cite{kassing2020exploring,lai2023starrynet}.
@@ -222,3 +226,4 @@ programs only $(\Delta_s^{+}, \Delta_s^{-})$ per node with make-before-break
 semantics, and at handover installs the post-mutation FIB before the old GSL
 disappears, turning orbital predictability into zero-millisecond data-plane
 outage in our emulation study.
+

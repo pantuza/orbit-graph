@@ -12,8 +12,6 @@ make paper-6x6            # appends into this directory
 make paper-plots          # figures → ./figures
 ```
 
-Re-run `make paper-8x8` if 8×8 steady/handover data was truncated (needs 400s sim).
-
 CSV outputs (`ping_raw.csv`, `outage_summary.csv`, …) are gitignored; this README is tracked.
 
 See `simulation_paper.json` for durations and `make help` for `paper-*` targets.

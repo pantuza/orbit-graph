@@ -13,7 +13,7 @@ run so that statistics are not diluted by late-emulation events near teardown.
 \subsection{Data-plane availability at GSL handover}
 \label{sec:analysis-handover}
 
-\begin{figure}[!t]
+\begin{figure}[!h]
   \centering
   \includegraphics[width=\linewidth]{figures/outage_vs_nodes.png}
   \caption{Mean data-plane outage at the first GSL handover versus constellation
@@ -54,6 +54,7 @@ the delay matrix before the old contact is torn down, and a centralized
 controller can commit forwarding for the new graph while both contacts briefly
 coexist, something distributed OSPF cannot do without protocol
 extensions~\cite{pam:opspf:2019,gregory:satellite-routing:2022}.
+
 
 \subsection{Reachability and latency across handover phases}
 \label{sec:analysis-dataplane}
@@ -109,26 +110,6 @@ of LEO graph dynamics~\cite{kassing2020exploring,handley:ground-relays:2019}.
 \subsection{Control-plane cost and incremental install}
 \label{sec:analysis-control}
 
-\begin{figure}[!t]
-  \centering
-  \includegraphics[width=\linewidth]{figures/control_handover.png}
-  \caption{Control-plane time at the first handover (log scale).
-    OSPF bars show BIRD route-dump collection (${\sim}200$–$230$\,ms).
-    OrbitGraph splits algorithmic graph computation (Dijkstra, ${\sim}1$–$12$\,ms)
-    from kernel route install (${\sim}3.5$–$14.6$\,s at handover on large grids).}
-  \label{fig:control-handover}
-\end{figure}
-
-\begin{figure}[!t]
-  \centering
-  \includegraphics[width=\linewidth]{figures/routes_installed_handover.png}
-  \caption{Kernel routes pushed at the first proactive handover (SDN only,
-    mean~$\pm$~stddev).
-    Incremental install touches hundreds of entries, not the full FIB
-    (${\sim}10{,}504$ routes at $10{\times}10$ initialization).}
-  \label{fig:routes-handover}
-\end{figure}
-
 Figure~\ref{fig:control-handover} separates control-plane algorithm from
 dataplane programming.
 OrbitGraph's graph recomputation remains in the millisecond range
@@ -138,6 +119,16 @@ What dominates is install time: pushing deltas through per-container
 command batches takes ${\sim}3.5$\,s on 27 nodes and
 ${\sim}14.6$\,s on 102 nodes at the first handover, orders of magnitude more
 than OSPF's ${\sim}200$\,ms route observation cost.
+
+\begin{figure}[!h]
+  \centering
+  \includegraphics[width=\linewidth]{figures/control_handover.png}
+  \caption{Control-plane time at the first handover (log scale).
+    OSPF bars show BIRD route-dump collection (${\sim}200$–$230$\,ms).
+    OrbitGraph splits algorithmic graph computation (Dijkstra, ${\sim}1$–$12$\,ms)
+    from kernel route install (${\sim}3.5$–$14.6$\,s at handover on large grids).}
+  \label{fig:control-handover}
+\end{figure}
 
 This asymmetry is intentional to report honestly.
 OSPF's bar measures how long it takes to read routing state after an
@@ -161,6 +152,16 @@ operations than the ${\sim}10{,}504$ routes required at initialization.
 Without incremental install, every handover would replay a full-table push and
 amplify the install-time penalty without improving availability.
 
+\begin{figure}[!h]
+  \centering
+  \includegraphics[width=\linewidth]{figures/routes_installed_handover.png}
+  \caption{Kernel routes pushed at the first proactive handover (SDN only,
+    mean~$\pm$~stddev).
+    Incremental install touches hundreds of entries, not the full FIB
+    (${\sim}10{,}504$ routes at $10{\times}10$ initialization).}
+  \label{fig:routes-handover}
+\end{figure}
+
 On delay-only ticks where next-hops are unchanged, OrbitGraph skips the
 dataplane entirely (${\sim}1$\,ms compute, zero install).
 OSPF incurs no equivalent metric on these ticks, but also cannot proactively
@@ -181,7 +182,6 @@ reshape forwarding before a scheduled handover.
 
 Figure~\ref{fig:outage-damage} presents a contrasting result, the
 regime where OrbitGraph is not the better option in our current implementation.
-
 At $t{=}5$ we disable 30\% of satellites (100\% loss on all interfaces).
 Both modes must recompute around a substantially changed $G_t$.
 OrbitGraph reacts with a full incremental reinstall (damage recovery),
@@ -244,3 +244,4 @@ Distributed OSPF remains a robust default for unplanned churn and for networks
 without a trusted global view; OrbitGraph shows that when the LEO network is
 a dynamic graph with known handover schedules, centralized shortest-path control
 can keep that graph connected in the data plane through every contact change.
+
