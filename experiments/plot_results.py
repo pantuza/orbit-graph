@@ -29,6 +29,17 @@ PING_BY_PHASE = "ping_summary_by_phase.csv"
 PING_RAW = "ping_raw.csv"
 CONTROL_BY_REASON = "control_summary_by_reason.csv"
 CONTROL_RAW = "control_raw.csv"
+EVENT_CLASS = "event_class.csv"
+
+# Handover-type control reasons and their event classification (see
+# experiments/classify_events.py): a coverage-preserving handover swaps a
+# ground station's serving satellite while a replacement is in view; a coverage
+# gap leaves a ground station with no satellite in view, so no protocol can route.
+HANDOVER_REASONS = ("topology_change", "proactive_handover")
+CLASS_LABELS = {
+    "handover": "Coverage-preserving GSL handover",
+    "coverage_gap": "Coverage-gap event (no satellite in view)",
+}
 
 PHASE_ORDER = ("post_init", "handover", "post_handover", "steady")
 MODE_COLORS = {"ospf": "#d62728", "sdn": "#1f77b4"}
@@ -427,27 +438,47 @@ def plot_outage_ecdf(
     raw_rows: List[dict],
     out_dir: str,
     dpi: int,
+    class_map: Optional[Dict[Tuple[int, int], str]] = None,
 ) -> Optional[List[str]]:
-    """Empirical CDF of first-handover data-plane outage, pooled across sizes.
+    """Empirical CDF of handover data-plane outage, pooled across sizes.
 
     Reads as: the fraction of handover repetitions completed within a given
     outage. SDN rises vertically at 0 ms (every handover seamless); OSPF's
     curve extends across seconds, exposing the black-hole tail.
+
+    When an event classification is available, the ECDF pools the worst
+    coverage-preserving handover per repetition (excluding coverage-gap events,
+    which are a physical-connectivity limitation shown separately); otherwise it
+    falls back to the first handover per repetition.
     """
     plt = _import_matplotlib()
     import numpy as np
 
-    sdn_reason = _sdn_handover_outage_reason(raw_rows)
+    if class_map:
+        agg = _worst_outage_by_class(raw_rows, class_map)
 
-    def _pooled(reason: str, mode: str) -> np.ndarray:
-        by_nodes = _first_outage_values_by_nodes_mode(raw_rows, reason, mode)
-        vals: List[float] = []
-        for lst in by_nodes.values():
-            vals.extend(lst)
-        return np.sort(np.asarray(vals, dtype=float))
+        def _pooled_mode(mode: str) -> np.ndarray:
+            vals: List[float] = []
+            for (_n, m, et), lst in agg.items():
+                if m == mode and et == "handover":
+                    vals.extend(lst)
+            return np.sort(np.asarray(vals, dtype=float))
 
-    ospf = _pooled(OSPF_HANDOVER_OUTAGE, "ospf")
-    sdn = _pooled(sdn_reason, "sdn")
+        ospf = _pooled_mode("ospf")
+        sdn = _pooled_mode("sdn")
+    else:
+        sdn_reason = _sdn_handover_outage_reason(raw_rows)
+
+        def _pooled(reason: str, mode: str) -> np.ndarray:
+            by_nodes = _first_outage_values_by_nodes_mode(raw_rows, reason, mode)
+            vals: List[float] = []
+            for lst in by_nodes.values():
+                vals.extend(lst)
+            return np.sort(np.asarray(vals, dtype=float))
+
+        ospf = _pooled(OSPF_HANDOVER_OUTAGE, "ospf")
+        sdn = _pooled(sdn_reason, "sdn")
+
     if ospf.size == 0 and sdn.size == 0:
         print("  skip outage_ecdf: no handover outage rows")
         return None
@@ -468,7 +499,9 @@ def plot_outage_ecdf(
 
     ax.set_xlabel("Data-plane outage at handover (s)")
     ax.set_ylabel("Fraction of handover repetitions")
-    ax.set_title("Handover outage ECDF (all constellation sizes pooled)")
+    ax.set_title("Coverage-preserving handover outage ECDF (all sizes pooled)"
+                 if class_map else
+                 "Handover outage ECDF (all constellation sizes pooled)")
     ax.set_ylim(0, 1.02)
     ax.set_xlim(left=-0.2)
     ax.grid(True, alpha=0.3)
@@ -481,6 +514,158 @@ def plot_outage_ecdf(
     )
     fig.tight_layout()
     return _save_figure(fig, out_dir, "outage_ecdf", dpi)
+
+
+def read_event_class(path: str) -> Dict[Tuple[int, int], str]:
+    """Load event_class.csv into {(nodes, time_index): event_type}."""
+    mapping: Dict[Tuple[int, int], str] = {}
+    with open(path, newline="", encoding="utf-8") as fh:
+        for row in csv.DictReader(fh):
+            n = _int(row.get("nodes"))
+            t = _int(row.get("time_index"))
+            et = row.get("event_type")
+            if n is not None and t is not None and et:
+                mapping[(n, t)] = et
+    return mapping
+
+
+def _worst_outage_by_class(
+    raw_rows: List[dict],
+    class_map: Dict[Tuple[int, int], str],
+) -> Dict[Tuple[int, str, str], List[float]]:
+    """Per-rep worst handover outage (seconds), keyed by (nodes, mode, event_type).
+
+    Each repetition contributes the maximum outage it saw among events of a given
+    class, so the plotted distribution reflects the decisive event of that class
+    rather than an incidental precursor.
+    """
+    per_rep: Dict[Tuple[int, str, str, str], float] = {}
+    for row in raw_rows:
+        if row.get("reason") not in HANDOVER_REASONS:
+            continue
+        n = _int(row.get("nodes"))
+        t = _int(row.get("time_index"))
+        rep = row.get("rep")
+        mode = row.get("mode")
+        val = _float(row.get("outage_ms"))
+        if n is None or t is None or rep is None or mode is None or val is None:
+            continue
+        event_type = class_map.get((n, t))
+        if event_type is None:
+            continue
+        key = (n, mode, event_type, rep)
+        secs = val / 1000.0
+        if key not in per_rep or secs > per_rep[key]:
+            per_rep[key] = secs
+
+    out: Dict[Tuple[int, str, str], List[float]] = defaultdict(list)
+    for (n, mode, event_type, _rep), secs in per_rep.items():
+        out[(n, mode, event_type)].append(secs)
+    return out
+
+
+def _plot_class_panel(
+    ax,
+    agg: Dict[Tuple[int, str, str], List[float]],
+    nodes: List[int],
+    event_type: str,
+    *,
+    title: str,
+) -> bool:
+    """One panel: OSPF vs SDN worst-outage distribution for one event class."""
+    any_data = False
+    offset = 0.2
+    for i, n in enumerate(nodes):
+        ospf = agg.get((n, "ospf", event_type), [])
+        sdn = agg.get((n, "sdn", event_type), [])
+        if ospf:
+            any_data = True
+            _draw_violin_box_strip(
+                ax, i - offset, ospf, MODE_COLORS["ospf"], width=0.34, seed=n)
+        if sdn:
+            any_data = True
+            _draw_violin_box_strip(
+                ax, i + offset, sdn, MODE_COLORS["sdn"], width=0.34, seed=n + 1)
+    ax.set_title(title, fontsize=10)
+    ax.set_xlabel("Constellation size (nodes)")
+    ax.set_xticks(range(len(nodes)))
+    ax.set_xticklabels([str(n) for n in nodes])
+    ax.grid(True, axis="y", alpha=0.3)
+    ax.set_ylim(bottom=-max(1.0, ax.get_ylim()[1] * 0.02))
+    return any_data
+
+
+def plot_handover_classified(
+    raw_rows: List[dict],
+    class_map: Dict[Tuple[int, int], str],
+    out_dir: str,
+    dpi: int,
+) -> Optional[List[str]]:
+    """Central result: handover outage split by physical event class.
+
+    Left panel: coverage-preserving GSL handovers, where a replacement satellite
+    is in view and OrbitGraph installs the new path before the old link is torn
+    down. Right panel: coverage-gap events, where a ground station has no
+    satellite in view and the ground-to-ground path is physically severed, so
+    neither OSPF nor OrbitGraph can route around it.
+    """
+    plt = _import_matplotlib()
+
+    agg = _worst_outage_by_class(raw_rows, class_map)
+    if not agg:
+        print("  skip handover_classified: no classified handover rows")
+        return None
+
+    ho_nodes = sorted({n for (n, _m, et) in agg if et == "handover"})
+    gap_nodes = sorted({n for (n, _m, et) in agg if et == "coverage_gap"})
+
+    have_gap = bool(gap_nodes)
+    ncols = 2 if have_gap else 1
+    widths = [max(1, len(ho_nodes)), max(1, len(gap_nodes))] if have_gap else [1]
+    fig, axes = plt.subplots(
+        1, ncols, figsize=(4.2 + 1.1 * (len(ho_nodes) + len(gap_nodes)), 4.5),
+        gridspec_kw={"width_ratios": widths}, squeeze=False,
+    )
+
+    any_data = _plot_class_panel(
+        axes[0][0], agg, ho_nodes, "handover",
+        title="Coverage-preserving GSL handovers",
+    )
+    axes[0][0].set_ylabel("Worst data-plane outage per run (s)")
+
+    if have_gap:
+        any_data |= _plot_class_panel(
+            axes[0][1], agg, gap_nodes, "coverage_gap",
+            title="Coverage-gap events (no satellite in view)",
+        )
+        axes[0][1].set_ylabel("Worst data-plane outage per run (s)")
+
+    if not any_data:
+        plt.close(fig)
+        print("  skip handover_classified: no plottable values")
+        return None
+
+    handles = [
+        plt.Line2D([0], [0], marker="o", linestyle="none",
+                   color=MODE_COLORS["ospf"], label="OSPF"),
+        plt.Line2D([0], [0], marker="o", linestyle="none",
+                   color=MODE_COLORS["sdn"], label="OrbitGraph (SDN)"),
+    ]
+    axes[0][0].legend(handles=handles, loc="upper left")
+    fig.suptitle(
+        "Handover outage by event class (worst event per run, ten repetitions)",
+        y=1.01,
+    )
+    fig.text(
+        0.5, -0.04,
+        "Violin=density, box=median/IQR, dots=each repetition. "
+        "On coverage-preserving handovers OrbitGraph holds 0 s while OSPF "
+        "reconverges for seconds; a coverage gap severs the path physically, so "
+        "both protocols black-hole.",
+        ha="center", fontsize=8, style="italic", wrap=True,
+    )
+    fig.tight_layout()
+    return _save_figure(fig, out_dir, "handover_classified", dpi)
 
 
 DAMAGE_RECOVERY = "damage_recovery"
@@ -1125,7 +1310,18 @@ def generate_figures(
             ["nodes", "mode", "phase", "loss_pct", "avg_rtt_ms"],
         )
 
-    if "outage" in summaries:
+    event_class_path = os.path.join(results_dir, EVENT_CLASS)
+    class_map: Dict[Tuple[int, int], str] = {}
+    if os.path.isfile(event_class_path):
+        class_map = read_event_class(event_class_path)
+
+    if raw_rows and class_map:
+        # Preferred central result: outage split by physical event class.
+        paths = plot_handover_classified(raw_rows, class_map, out_dir, dpi)
+        if paths:
+            written.extend(paths)
+    elif "outage" in summaries:
+        # Fallback for datasets without an event classification.
         rows = read_table(
             summaries["outage"],
             ["nodes", "mode", "reason", "outage_ms_mean", "outage_ms_std"],
@@ -1135,7 +1331,7 @@ def generate_figures(
             written.extend(paths)
 
     if raw_rows:
-        paths = plot_outage_ecdf(raw_rows, out_dir, dpi)
+        paths = plot_outage_ecdf(raw_rows, out_dir, dpi, class_map=class_map or None)
         if paths:
             written.extend(paths)
         paths = plot_outage_damage_recovery(raw_rows, out_dir, dpi)
