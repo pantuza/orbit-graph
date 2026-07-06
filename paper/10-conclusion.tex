@@ -35,13 +35,15 @@ new ground--satellite links coexist, make-before-break at the topology level.
 Distributed OSPF cannot match that behavior without protocol extensions,
 because no single router observes the full mutation schedule in advance.
 Our container-based evaluation on StarryNet~\cite{lai2023starrynet}, spanning
-27 to 102 nodes with ten repetitions per configuration, shows 0\,ms mean
-data-plane outage at the first GSL handover on every grid size versus
-multi-second OSPF black holes (up to ${\sim}13.6$\,s), 0\% packet loss through
-handover and post-handover phases under OrbitGraph while OSPF loss reaches 100\%
-on several grids during reconvergence, comparable steady-state latency once both
-modes settle, and incremental graph updates that keep programmatic cost
-proportional to handover scope rather than constellation size.
+27 to 102 nodes with ten repetitions per configuration, shows 0\,ms data-plane
+outage on every coverage-preserving GSL handover versus multi-second OSPF black
+holes (up to ${\sim}15$\,s), 0\% packet loss through handover and post-handover
+phases under OrbitGraph while OSPF loss reaches 100\% on several grids during
+reconvergence, comparable steady-state latency once both modes settle, and
+incremental graph updates that keep programmatic cost proportional to handover
+scope rather than constellation size. Where the constellation is too sparse to
+keep a ground station in view, a coverage gap severs the path for both protocols,
+delimiting the regime in which control-plane ordering is decisive.
 
 OrbitGraph demonstrates that graph-centric SDN routing
 can keep an emulated LEO network connected through predictable topology
