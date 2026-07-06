@@ -33,11 +33,14 @@ scaling study, but seed sensitivity (especially for random satellite damage)
 warrants wider confidence intervals and, where feasible, non-parametric tests
 across the full $5{\times}5$–$10{\times}10$ matrix.
 
-Each run captures the first GSL handover by design.
+Each run already exposes several handover events, which we classify by
+ground-station coverage to separate routing behavior from physical connectivity.
 Mega-constellations experience continuous contact churn; emulating multi-hour
 windows with dozens of handovers per ground station would reveal whether
 incremental baselines stay consistent and whether error accumulation in address
-caches or route-key bookkeeping appears over time.
+caches or route-key bookkeeping appears over time. Denser constellations would
+also close the coverage gaps that a sparse grid exposes at a fixed ground-station
+latitude, isolating control-plane behavior from satellite visibility.
 We use a single autonomous system with two fixed ground stations and
 LeastDelay intra-domain routing.
 Extending to multi-AS topologies with BGP peering at gateways, or to
