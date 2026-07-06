@@ -16,12 +16,16 @@ run so that statistics are not diluted by late-emulation events near teardown.
 \begin{figure}[!h]
   \centering
   \includegraphics[width=\linewidth]{figures/outage_vs_nodes.png}
-  \caption{Mean data-plane outage at the first GSL handover versus constellation
-    size ($N$ nodes).
-    OSPF (topology-change events) exhibits multi-second black holes;
-    OrbitGraph (proactive handover) maintains 0\,s mean outage on every
-    grid where the first handover completes inside the emulation window.
-    Error bars: standard deviation over ten repetitions.}
+  \caption{Data-plane outage at the first GSL handover versus constellation
+    size ($N$ nodes), OSPF (red, topology-change events) against OrbitGraph
+    (blue, proactive handover).
+    Each cell shows the distribution over ten repetitions: the shaded violin is
+    the estimated density, the inner box marks the median and interquartile
+    range, and every dot is one repetition.
+    OSPF exhibits wide, multi-second black holes whose severity depends on
+    handover geometry; OrbitGraph collapses to a point mass at 0\,s (dots on the
+    baseline) on every grid where the first handover completes inside the
+    emulation window.}
   \label{fig:outage-handover}
 \end{figure}
 
@@ -31,13 +35,37 @@ measures sustained loss bursts aligned to control-plane events
 (Section~\ref{sec:experiments}); this metric captures downtime that tick-scheduled
 pings miss when route installation blocks the emulation loop.
 
-At the first handover, OSPF data-plane outage grows with constellation size and
-peaks at ${\sim}13.6$\,s on the $7{\times}7$ grid (51 nodes), with
-${\sim}5.7$\,s on $6{\times}6$ (38 nodes) and ${\sim}7.7$\,s on $10{\times}10$
-(102 nodes).
-These gaps correspond to the interval between GSL teardown and BIRD/OSPF
-reconvergence: traffic is forwarded along stale or missing next-hops until
-link-state flooding completes~\cite{sidhu:ospf:1993}.
+\begin{figure}[!h]
+  \centering
+  \includegraphics[width=\linewidth]{figures/outage_ecdf.png}
+  \caption{Empirical cumulative distribution of first-handover data-plane
+    outage, pooling every repetition across all constellation sizes.
+    A curve reaching the top-left corner is better: it means most repetitions
+    finished the handover with little or no outage.
+    OrbitGraph (blue) rises vertically at 0\,s, so every repetition is seamless;
+    OSPF (red) spreads across seconds, with a tail extending beyond 13\,s.}
+  \label{fig:outage-ecdf}
+\end{figure}
+
+Figure~\ref{fig:outage-ecdf} pools every handover repetition into a single
+empirical cumulative distribution function.
+The two curves separate completely: OrbitGraph reaches unit probability at 0\,s,
+whereas roughly half of OSPF repetitions incur at least several seconds of
+outage and the worst reach the multi-second tail visible in
+Figure~\ref{fig:outage-handover}.
+
+At the first handover, OSPF data-plane outage is severe but varies
+non-monotonically with constellation size, because it depends on the geometry of
+which ground-satellite contact is torn down and how far the replacement path
+lies from the old one.
+It peaks at ${\sim}13.6$\,s on the $7{\times}7$ grid (51 nodes), with
+${\sim}5.7$\,s on $6{\times}6$ (38 nodes) and ${\sim}4.5$\,s on $5{\times}5$
+(27 nodes); on several larger grids the first handover happens not to disrupt
+the active path, and outage stays below one second
+(Figure~\ref{fig:outage-handover}).
+Where a black hole does occur, its duration corresponds to the interval between
+GSL teardown and BIRD/OSPF reconvergence: traffic is forwarded along stale or
+missing next-hops until link-state flooding completes~\cite{sidhu:ospf:1993}.
 
 OrbitGraph inverts this picture.
 By installing the post-handover FIB after new GSLs are added but \emph{before}
@@ -71,12 +99,14 @@ extensions~\cite{pam:opspf:2019,gregory:satellite-routing:2022}.
     \includegraphics[width=\linewidth]{figures/rtt_by_phase.png}\\[-0.5ex]
     {\footnotesize (b) Mean RTT by phase}
   \end{minipage}
-  \caption{End-to-end ground-station ping metrics by handover-relative phase
-    (mean~$\pm$~stddev over ten repetitions).
+  \caption{End-to-end ground-station ping metrics by handover-relative phase,
+    OSPF (red) against OrbitGraph (blue).
+    Each cell shows the distribution over ten repetitions as a violin (density),
+    inner box (median and interquartile range), and one dot per repetition.
     (a)~Loss; (b)~RTT.
-    OrbitGraph holds 0\% loss through handover and post-handover
-    on all grid sizes; OSPF loss spikes during reconvergence (e.g., 100\% on
-    $7{\times}7$).}
+    OrbitGraph holds 0\% loss through handover and post-handover on all grid
+    sizes (dots on the baseline); OSPF loss is bimodal during reconvergence,
+    with repetitions clustering at either 0\% or 100\% rather than at the mean.}
   \label{fig:phase-metrics}
 \end{figure*}
 
@@ -84,11 +114,15 @@ Figure~\ref{fig:phase-metrics} complements
 Figure~\ref{fig:outage-handover} with scheduled probes at the handover tick,
 two seconds later, and near emulation end.
 
-OrbitGraph achieves 0\% mean loss in the handover and post-handover phases on
-every grid size.
-OSPF loss is highly phase-dependent: on $6{\times}6$ half of handover probes
-are lost (50\% mean); on $7{\times}7$ both handover and post-handover phases
-reach 100\% loss because the path is black-holed until OSPF settles.
+OrbitGraph achieves 0\% loss in the handover and post-handover phases on
+every grid size and in every repetition.
+OSPF loss is phase-dependent and, more importantly, bimodal across repetitions:
+the distribution view shows that a handover either forwards cleanly (0\%) or is
+fully black-holed (100\%), with few intermediate outcomes.
+On $6{\times}6$ the handover phase splits between these extremes, so the
+50\% mean reported by a summary statistic corresponds to no single repetition;
+on $7{\times}7$ the handover and post-handover phases sit at 100\% loss because
+the path is black-holed until OSPF settles.
 After convergence (steady phase), OSPF recovers to 0\% loss; both modes
 eventually forward correctly once the distributed database catches up.
 
@@ -155,8 +189,10 @@ amplify the install-time penalty without improving availability.
 \begin{figure}[!h]
   \centering
   \includegraphics[width=\linewidth]{figures/routes_installed_handover.png}
-  \caption{Kernel routes pushed at the first proactive handover (SDN only,
-    mean~$\pm$~stddev).
+  \caption{Kernel routes pushed at the first proactive handover (SDN only).
+    Each bar is the mean over ten repetitions; the overlaid dots are the
+    individual runs, showing that the incremental install size is highly stable
+    across repetitions.
     Incremental install touches hundreds of entries, not the full FIB
     (${\sim}10{,}504$ routes at $10{\times}10$ initialization).}
   \label{fig:routes-handover}
@@ -174,9 +210,12 @@ reshape forwarding before a scheduled handover.
   \centering
   \includegraphics[width=\linewidth]{figures/outage_damage_recovery.png}
   \caption{Data-plane outage after link damage ($t{=}5$) and recovery ($t{=}10$),
-    median per repetition.
-    OrbitGraph does not outperform OSPF on these events; SDN install
-    latency can extend the loss burst relative to distributed reconvergence.}
+    OSPF (red) against OrbitGraph (blue).
+    Each cell shows the distribution over repetitions as a violin (density),
+    inner box (median and interquartile range), and one dot per repetition.
+    OrbitGraph does not outperform OSPF on these events: the SDN distribution
+    sits higher and wider because install latency extends the loss burst
+    relative to distributed reconvergence.}
   \label{fig:outage-damage}
 \end{figure}
 
