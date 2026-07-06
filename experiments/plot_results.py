@@ -26,6 +26,7 @@ from typing import Dict, List, Optional, Sequence, Tuple
 OUTAGE_SUMMARY = "outage_summary.csv"
 OUTAGE_RAW = "outage_raw.csv"
 PING_BY_PHASE = "ping_summary_by_phase.csv"
+PING_RAW = "ping_raw.csv"
 CONTROL_BY_REASON = "control_summary_by_reason.csv"
 CONTROL_RAW = "control_raw.csv"
 
@@ -217,6 +218,80 @@ def _ping_phase_plottable(row: dict, value_key: str) -> bool:
     return _float(row.get(value_key)) is not None
 
 
+def _draw_violin_box_strip(
+    ax,
+    pos: float,
+    values: List[float],
+    color: str,
+    *,
+    width: float = 0.6,
+    jitter: float = 0.05,
+    seed: int = 0,
+) -> None:
+    """Draw a violin (density) + inner box (median/IQR) + jittered strip (every rep).
+
+    With few repetitions a kernel density oversmooths, so the individual points
+    are always drawn on top: the reader sees the real sample behind the shape.
+    A degenerate group (all identical values, e.g. SDN's 0 ms) draws only the
+    dots, honestly showing a point mass instead of an invented density.
+    """
+    import numpy as np
+
+    vals = [float(v) for v in values if v is not None]
+    if not vals:
+        return
+    arr = np.asarray(vals, dtype=float)
+
+    if len(arr) >= 2 and float(np.ptp(arr)) > 0:
+        parts = ax.violinplot(
+            [arr], positions=[pos], widths=width,
+            showmeans=False, showextrema=False, showmedians=False,
+        )
+        for body in parts["bodies"]:
+            body.set_facecolor(color)
+            body.set_edgecolor(color)
+            body.set_alpha(0.25)
+        bp = ax.boxplot(
+            [arr], positions=[pos], widths=width * 0.32,
+            patch_artist=True, showfliers=False, manage_ticks=False,
+            medianprops=dict(color="black", linewidth=1.3),
+        )
+        for patch in bp["boxes"]:
+            patch.set_facecolor("white")
+            patch.set_alpha(0.9)
+            patch.set_edgecolor(color)
+        for artist in bp["whiskers"] + bp["caps"]:
+            artist.set_color(color)
+
+    rng = np.random.default_rng(seed)
+    xs = pos + rng.uniform(-jitter, jitter, size=len(arr))
+    ax.scatter(
+        xs, arr, s=16, color=color, edgecolor="black", linewidth=0.3,
+        alpha=0.7, zorder=4,
+    )
+
+
+def _first_outage_values_by_nodes_mode(
+    raw_rows: List[dict],
+    reason: str,
+    mode: str,
+) -> Dict[int, List[float]]:
+    """Per-rep first-handover outage (seconds) for one mode, keyed by node count."""
+    rows = _first_event_rows_per_rep(raw_rows, reason)
+    out: Dict[int, List[float]] = defaultdict(list)
+    for row in rows:
+        if row.get("mode") != mode:
+            continue
+        if _truthy(row.get("still_down")):
+            continue
+        n = _int(row.get("nodes"))
+        val = _float(row.get("outage_ms"))
+        if n is None or val is None:
+            continue
+        out[n].append(val / 1000.0)
+    return out
+
+
 def _plot_outage_series(
     ax,
     nodes: List[int],
@@ -251,35 +326,55 @@ def plot_outage_vs_nodes(
     dpi: int,
     raw_rows: Optional[List[dict]] = None,
 ) -> Optional[List[str]]:
-    """Data-plane outage at first handover per rep (not pooled multi-handover)."""
+    """Data-plane outage at first handover per rep (not pooled multi-handover).
+
+    With per-rep raw data, each constellation size shows the full distribution
+    of the ten repetitions as a violin + box + jittered strip, so OSPF's spread
+    and SDN's zero point mass are both visible; otherwise falls back to a
+    mean+/-stddev summary series.
+    """
     plt = _import_matplotlib()
+    import numpy as np
+
     nodes = _sorted_nodes(rows if raw_rows is None else raw_rows)
     if not nodes:
         print("  skip outage_vs_nodes: no node data")
         return None
 
     sdn_reason = _sdn_handover_outage_reason(rows)
-    fig, ax = plt.subplots(figsize=(7, 4.5))
-    any_data = False
 
     if raw_rows:
-        ospf_agg = _aggregate_numeric_by_nodes_mode(
-            _first_event_rows_per_rep(raw_rows, OSPF_HANDOVER_OUTAGE),
-            "outage_ms",
-        )
-        sdn_agg = _aggregate_numeric_by_nodes_mode(
-            _first_event_rows_per_rep(raw_rows, sdn_reason),
-            "outage_ms",
-        )
-        any_data |= _plot_outage_series(
-            ax, nodes, ospf_agg, mode="ospf",
-            label="OSPF (topology change, 1st handover)",
-        )
-        any_data |= _plot_outage_series(
-            ax, nodes, sdn_agg, mode="sdn",
-            label=f"SDN ({sdn_reason.replace('_', ' ')}, 1st handover)",
-        )
+        ospf_vals = _first_outage_values_by_nodes_mode(
+            raw_rows, OSPF_HANDOVER_OUTAGE, "ospf")
+        sdn_vals = _first_outage_values_by_nodes_mode(
+            raw_rows, sdn_reason, "sdn")
+        if not ospf_vals and not sdn_vals:
+            print("  skip outage_vs_nodes: no handover outage rows")
+            return None
+
+        fig, ax = plt.subplots(figsize=(7.5, 4.5))
+        offset = 0.2
+        for i, n in enumerate(nodes):
+            _draw_violin_box_strip(
+                ax, i - offset, ospf_vals.get(n, []),
+                MODE_COLORS["ospf"], width=0.34, seed=n,
+            )
+            _draw_violin_box_strip(
+                ax, i + offset, sdn_vals.get(n, []),
+                MODE_COLORS["sdn"], width=0.34, seed=n + 1,
+            )
+        ax.set_xticks(range(len(nodes)))
+        ax.set_xticklabels([str(n) for n in nodes])
+        handles = [
+            plt.Line2D([0], [0], marker="o", linestyle="none",
+                       color=MODE_COLORS["ospf"], label="OSPF (topology change)"),
+            plt.Line2D([0], [0], marker="o", linestyle="none",
+                       color=MODE_COLORS["sdn"], label="SDN (proactive handover)"),
+        ]
+        ax.legend(handles=handles, loc="upper left")
     else:
+        fig, ax = plt.subplots(figsize=(7, 4.5))
+        any_data = False
         series = [
             ("ospf", OSPF_HANDOVER_OUTAGE, "OSPF (topology change)"),
             ("sdn", sdn_reason, f"SDN ({sdn_reason.replace('_', ' ')})"),
@@ -295,11 +390,9 @@ def plot_outage_vs_nodes(
                 if mean is None:
                     continue
                 std = _float(row.get("outage_ms_std")) or 0.0
-                mean_s = mean / 1000.0
-                std_s = std / 1000.0
                 xs.append(n)
-                ys.append(mean_s)
-                yerr.append(_clip_lower_yerr(mean_s, std_s))
+                ys.append(mean / 1000.0)
+                yerr.append(_clip_lower_yerr(mean / 1000.0, std / 1000.0))
             if not xs:
                 continue
             any_data = True
@@ -307,28 +400,87 @@ def plot_outage_vs_nodes(
                 xs, ys, yerr=yerr, marker="o", capsize=4, linewidth=2,
                 label=label, color=MODE_COLORS.get(mode, None),
             )
-
-    if not any_data:
-        plt.close(fig)
-        print("  skip outage_vs_nodes: no handover outage rows")
-        return None
+        if not any_data:
+            plt.close(fig)
+            print("  skip outage_vs_nodes: no handover outage rows")
+            return None
+        ax.legend()
+        if len(nodes) > 1:
+            ax.set_xticks(nodes)
 
     ax.set_xlabel("Constellation size (nodes)")
     ax.set_ylabel("Data-plane outage at handover (s)")
     ax.set_title("Handover black-hole duration — first handover per run")
-    ax.set_ylim(bottom=0)
-    ax.legend()
-    ax.grid(True, alpha=0.3)
-    if len(nodes) > 1:
-        ax.set_xticks(nodes)
+    ax.set_ylim(bottom=-0.3)
+    ax.grid(True, axis="y", alpha=0.3)
     fig.text(
         0.5, -0.06,
-        "Uses earliest handover event per rep (avoids pooling later handovers "
-        "near simulation end).",
+        "Distribution over ten repetitions (violin=density, box=median/IQR, "
+        "dots=each rep). Earliest handover event per rep.",
         ha="center", fontsize=8, style="italic",
     )
     fig.tight_layout()
     return _save_figure(fig, out_dir, "outage_vs_nodes", dpi)
+
+
+def plot_outage_ecdf(
+    raw_rows: List[dict],
+    out_dir: str,
+    dpi: int,
+) -> Optional[List[str]]:
+    """Empirical CDF of first-handover data-plane outage, pooled across sizes.
+
+    Reads as: the fraction of handover repetitions completed within a given
+    outage. SDN rises vertically at 0 ms (every handover seamless); OSPF's
+    curve extends across seconds, exposing the black-hole tail.
+    """
+    plt = _import_matplotlib()
+    import numpy as np
+
+    sdn_reason = _sdn_handover_outage_reason(raw_rows)
+
+    def _pooled(reason: str, mode: str) -> np.ndarray:
+        by_nodes = _first_outage_values_by_nodes_mode(raw_rows, reason, mode)
+        vals: List[float] = []
+        for lst in by_nodes.values():
+            vals.extend(lst)
+        return np.sort(np.asarray(vals, dtype=float))
+
+    ospf = _pooled(OSPF_HANDOVER_OUTAGE, "ospf")
+    sdn = _pooled(sdn_reason, "sdn")
+    if ospf.size == 0 and sdn.size == 0:
+        print("  skip outage_ecdf: no handover outage rows")
+        return None
+
+    fig, ax = plt.subplots(figsize=(7, 4.5))
+    for arr, mode, label in (
+        (ospf, "ospf", "OSPF (topology change)"),
+        (sdn, "sdn", "SDN (proactive handover)"),
+    ):
+        if arr.size == 0:
+            continue
+        y = np.arange(1, arr.size + 1) / arr.size
+        # Step from 0 so a point mass at 0 s shows as a vertical rise at x=0.
+        xs = np.concatenate(([0.0], arr))
+        ys = np.concatenate(([0.0], y))
+        ax.step(xs, ys, where="post", linewidth=2.2,
+                color=MODE_COLORS[mode], label=f"{label} (n={arr.size})")
+
+    ax.set_xlabel("Data-plane outage at handover (s)")
+    ax.set_ylabel("Fraction of handover repetitions")
+    ax.set_title("Handover outage ECDF (all constellation sizes pooled)")
+    ax.set_ylim(0, 1.02)
+    ax.set_xlim(left=-0.2)
+    ax.grid(True, alpha=0.3)
+    ax.legend(loc="lower right")
+    fig.text(
+        0.5, -0.04,
+        "Curve further left is better. SDN reaches 1.0 at 0 s (no black hole); "
+        "OSPF's tail extends to multi-second outages.",
+        ha="center", fontsize=8, style="italic",
+    )
+    fig.tight_layout()
+    return _save_figure(fig, out_dir, "outage_ecdf", dpi)
 
 
 DAMAGE_RECOVERY = "damage_recovery"
@@ -336,14 +488,14 @@ DAMAGE_TIME = 5
 RECOVERY_TIME = 10
 
 
-def _aggregate_outage_raw(
+def _damage_outage_values(
     rows: List[dict],
     time_index: int,
-    *,
-    use_median: bool = False,
-) -> Dict[Tuple[str, str], Tuple[float, float]]:
-    """Return {(nodes, mode): (center_ms, spread_ms)} for one damage/recovery tick."""
-    grouped: Dict[Tuple[str, str], List[float]] = defaultdict(list)
+    nodes: int,
+    mode: str,
+) -> List[float]:
+    """Per-rep outage (seconds) at one damage/recovery tick for a node/mode cell."""
+    out: List[float] = []
     for row in rows:
         if row.get("reason") != DAMAGE_RECOVERY:
             continue
@@ -351,57 +503,42 @@ def _aggregate_outage_raw(
             continue
         if _truthy(row.get("still_down")):
             continue
-        val = _float(row.get("outage_ms"))
-        if val is None:
+        if _int(row.get("nodes")) != nodes or row.get("mode") != mode:
             continue
-        grouped[(row["nodes"], row["mode"])].append(val)
-
-    out: Dict[Tuple[str, str], Tuple[float, float]] = {}
-    for key, values in grouped.items():
-        if use_median:
-            center = statistics.median(values)
-            spread = _spread(values, use_median=True)
-        else:
-            center = statistics.fmean(values)
-            spread = _spread(values, use_median=False)
-        out[key] = (center, spread)
+        val = _float(row.get("outage_ms"))
+        if val is not None:
+            out.append(val / 1000.0)
     return out
 
 
-def _plot_outage_panel(
+def _plot_damage_panel(
     ax,
-    agg: Dict[Tuple[str, str], Tuple[float, float]],
+    raw_rows: List[dict],
+    time_index: int,
     nodes: List[int],
     *,
     title: str,
 ) -> bool:
-    """One panel: OSPF vs SDN outage at a fixed sim tick."""
+    """One panel: OSPF vs SDN outage distribution at a fixed damage/recovery tick."""
     any_data = False
-    for mode, label in (("ospf", "OSPF"), ("sdn", "SDN")):
-        xs, ys, yerr = [], [], []
-        for n in nodes:
-            key = (str(n), mode)
-            if key not in agg:
-                continue
-            mean_ms, std_ms = agg[key]
-            mean_s = mean_ms / 1000.0
-            std_s = std_ms / 1000.0
-            xs.append(n)
-            ys.append(mean_s)
-            yerr.append(_clip_lower_yerr(mean_s, std_s))
-        if not xs:
-            continue
-        any_data = True
-        ax.errorbar(
-            xs, ys, yerr=yerr, marker="o", capsize=4, linewidth=2,
-            label=label, color=MODE_COLORS.get(mode, None),
-        )
+    offset = 0.2
+    for i, n in enumerate(nodes):
+        ospf = _damage_outage_values(raw_rows, time_index, n, "ospf")
+        sdn = _damage_outage_values(raw_rows, time_index, n, "sdn")
+        if ospf:
+            any_data = True
+            _draw_violin_box_strip(
+                ax, i - offset, ospf, MODE_COLORS["ospf"], width=0.34, seed=n)
+        if sdn:
+            any_data = True
+            _draw_violin_box_strip(
+                ax, i + offset, sdn, MODE_COLORS["sdn"], width=0.34, seed=n + 1)
     ax.set_title(title)
     ax.set_xlabel("Constellation size (nodes)")
-    ax.grid(True, alpha=0.3)
-    ax.set_ylim(bottom=0)
-    if len(nodes) > 1:
-        ax.set_xticks(nodes)
+    ax.set_xticks(range(len(nodes)))
+    ax.set_xticklabels([str(n) for n in nodes])
+    ax.grid(True, axis="y", alpha=0.3)
+    ax.set_ylim(bottom=-1)
     return any_data
 
 
@@ -411,11 +548,12 @@ def plot_outage_damage_recovery(
     dpi: int,
 ) -> Optional[List[str]]:
     """
-    Link damage (t=5) vs recovery (t=10) data-plane outage.
+    Link damage (t=5) vs recovery (t=10) data-plane outage distribution.
 
-    Uses median ± MAD per rep (robust to outlier reps).  SDN pushes a full
+    Shows the full per-rep spread (violin + box + strip). SDN pushes a full
     FIB reinstall after damage; OSPF converges locally — not comparable to
-    proactive handover (see outage_vs_nodes).
+    proactive handover (see outage_vs_nodes). This is the honest negative
+    result: SDN outage can exceed OSPF here.
     """
     plt = _import_matplotlib()
     nodes = sorted({
@@ -426,17 +564,14 @@ def plot_outage_damage_recovery(
         print("  skip outage_damage_recovery: no raw damage_recovery rows")
         return None
 
-    damage_agg = _aggregate_outage_raw(raw_rows, DAMAGE_TIME, use_median=True)
-    recovery_agg = _aggregate_outage_raw(raw_rows, RECOVERY_TIME, use_median=True)
-
     fig, axes = plt.subplots(1, 2, figsize=(11, 4.8), sharey=True)
-    left_ok = _plot_outage_panel(
-        axes[0], damage_agg, nodes,
-        title=f"Link damage (t={DAMAGE_TIME}) — median per rep",
+    left_ok = _plot_damage_panel(
+        axes[0], raw_rows, DAMAGE_TIME, nodes,
+        title=f"Link damage (t={DAMAGE_TIME})",
     )
-    right_ok = _plot_outage_panel(
-        axes[1], recovery_agg, nodes,
-        title=f"Link recovery (t={RECOVERY_TIME}) — median per rep",
+    right_ok = _plot_damage_panel(
+        axes[1], raw_rows, RECOVERY_TIME, nodes,
+        title=f"Link recovery (t={RECOVERY_TIME})",
     )
 
     if not left_ok and not right_ok:
@@ -445,20 +580,125 @@ def plot_outage_damage_recovery(
         return None
 
     axes[0].set_ylabel("Data-plane outage (s)")
-    axes[1].legend(loc="best")
+    handles = [
+        plt.Line2D([0], [0], marker="o", linestyle="none",
+                   color=MODE_COLORS["ospf"], label="OSPF"),
+        plt.Line2D([0], [0], marker="o", linestyle="none",
+                   color=MODE_COLORS["sdn"], label="SDN"),
+    ]
+    axes[1].legend(handles=handles, loc="best")
     fig.suptitle(
         "Link failure scenario (not handover): SDN full FIB reinstall vs OSPF local convergence",
         y=1.04, fontsize=11,
     )
     fig.text(
         0.5, -0.02,
+        "Distribution over repetitions (violin=density, box=median/IQR, dots=each rep). "
         "SDN outage during damage includes centralized route push to all containers; "
-        "proactive handover uses incremental install with zero black hole (outage_vs_nodes). "
-        "Recovery (right) shows both modes after the link is restored.",
+        "proactive handover instead uses incremental install with zero black hole "
+        "(outage_vs_nodes).",
         ha="center", fontsize=8, style="italic", wrap=True,
     )
     fig.tight_layout()
     return _save_figure(fig, out_dir, "outage_damage_recovery", dpi)
+
+
+def _phase_values(
+    raw_rows: List[dict],
+    value_key: str,
+    nodes: int,
+    mode: str,
+    phase: str,
+) -> List[float]:
+    """Per-rep values (loss_pct or avg_rtt_ms) for one node/mode/phase cell."""
+    out: List[float] = []
+    for row in raw_rows:
+        if (_int(row.get("nodes")) != nodes or row.get("mode") != mode
+                or row.get("phase") != phase):
+            continue
+        val = _float(row.get(value_key))
+        if val is not None:
+            out.append(val)
+    return out
+
+
+def _plot_phase_violin(
+    raw_rows: List[dict],
+    out_dir: str,
+    dpi: int,
+    *,
+    value_key: str,
+    ylabel: str,
+    title: str,
+    stem: str,
+    ylim: Optional[Tuple[float, float]] = None,
+) -> Optional[List[str]]:
+    """Per-phase distribution (violin+box+strip) of a ping metric vs size.
+
+    One panel per handover-relative phase; within each panel, OSPF and SDN
+    violins sit side by side at every constellation size. Distribution view
+    reveals bimodal OSPF loss (0% or 100%) that a mean would blur.
+    """
+    plt = _import_matplotlib()
+
+    nodes = sorted({
+        _int(r["nodes"]) for r in raw_rows if _int(r.get("nodes")) is not None
+    })
+    if not nodes:
+        print(f"  skip {stem}: no node data")
+        return None
+    phases = [p for p in PHASE_ORDER
+              if any(r.get("phase") == p for r in raw_rows)]
+    if not phases:
+        print(f"  skip {stem}: no phase rows")
+        return None
+
+    fig, axes = plt.subplots(
+        1, len(phases), figsize=(3.4 * len(phases), 4.2),
+        sharey=True, squeeze=False,
+    )
+    offset = 0.2
+    any_data = False
+    for ax, phase in zip(axes[0], phases):
+        for i, n in enumerate(nodes):
+            ospf = _phase_values(raw_rows, value_key, n, "ospf", phase)
+            sdn = _phase_values(raw_rows, value_key, n, "sdn", phase)
+            if ospf:
+                any_data = True
+                _draw_violin_box_strip(
+                    ax, i - offset, ospf, MODE_COLORS["ospf"],
+                    width=0.34, seed=n,
+                )
+            if sdn:
+                any_data = True
+                _draw_violin_box_strip(
+                    ax, i + offset, sdn, MODE_COLORS["sdn"],
+                    width=0.34, seed=n + 1,
+                )
+        ax.set_title(phase.replace("_", " "))
+        ax.set_xlabel("nodes")
+        ax.set_xticks(range(len(nodes)))
+        ax.set_xticklabels([str(n) for n in nodes])
+        ax.grid(True, axis="y", alpha=0.3)
+
+    if not any_data:
+        plt.close(fig)
+        print(f"  skip {stem}: no plottable values")
+        return None
+
+    axes[0, 0].set_ylabel(ylabel)
+    if ylim is not None:
+        axes[0, 0].set_ylim(*ylim)
+    handles = [
+        plt.Line2D([0], [0], marker="o", linestyle="none",
+                   color=MODE_COLORS["ospf"], label="OSPF"),
+        plt.Line2D([0], [0], marker="o", linestyle="none",
+                   color=MODE_COLORS["sdn"], label="SDN"),
+    ]
+    axes[0, -1].legend(handles=handles, loc="best")
+    fig.suptitle(title, y=1.02)
+    fig.tight_layout()
+    return _save_figure(fig, out_dir, stem, dpi)
 
 
 def _plot_by_phase(
@@ -546,8 +786,17 @@ def plot_rtt_by_phase(
     rows: List[dict],
     out_dir: str,
     dpi: int,
+    raw_rows: Optional[List[dict]] = None,
 ) -> Optional[List[str]]:
     """RTT by handover-relative phase vs constellation size."""
+    if raw_rows:
+        return _plot_phase_violin(
+            raw_rows, out_dir, dpi,
+            value_key="avg_rtt_ms",
+            ylabel="RTT (ms)",
+            title="Ping RTT by phase (distribution over repetitions)",
+            stem="rtt_by_phase",
+        )
     return _plot_by_phase(
         rows, out_dir, dpi,
         mean_key="rtt_mean_ms",
@@ -562,8 +811,18 @@ def plot_loss_by_phase(
     rows: List[dict],
     out_dir: str,
     dpi: int,
+    raw_rows: Optional[List[dict]] = None,
 ) -> Optional[List[str]]:
     """Packet loss by handover-relative phase vs constellation size."""
+    if raw_rows:
+        return _plot_phase_violin(
+            raw_rows, out_dir, dpi,
+            value_key="loss_pct",
+            ylabel="Packet loss (%)",
+            title="Ping loss by phase (distribution over repetitions)",
+            stem="loss_by_phase",
+            ylim=(-5, 105),
+        )
     return _plot_by_phase(
         rows, out_dir, dpi,
         mean_key="loss_mean_pct",
@@ -736,23 +995,32 @@ def plot_routes_installed_handover(
         print("  skip routes_installed_handover: no node data")
         return None
 
+    import numpy as np
+
     fig, ax = plt.subplots(figsize=(7, 4.5))
-    xs, ys, yerr = [], [], []
+    plot_nodes: List[int] = []
+    means: List[float] = []
+    stds: List[float] = []
+    per_node_values: Dict[int, List[float]] = {}
 
     if control_raw_rows:
         first = _first_event_rows_per_rep(
             control_raw_rows, SDN_HANDOVER_INSTALL)
-        agg = _aggregate_numeric_by_nodes_mode(
-            first, "installed", skip_still_down=False,
-        )
-        for n in nodes:
-            key = (str(n), "sdn")
-            if key not in agg:
+        for row in first:
+            if row.get("mode") != "sdn":
                 continue
-            mean, std, _count = agg[key]
-            xs.append(n)
-            ys.append(mean)
-            yerr.append(std)
+            n = _int(row.get("nodes"))
+            val = _float(row.get("installed"))
+            if n is None or val is None:
+                continue
+            per_node_values.setdefault(n, []).append(val)
+        for n in nodes:
+            vals = per_node_values.get(n)
+            if not vals:
+                continue
+            plot_nodes.append(n)
+            means.append(statistics.fmean(vals))
+            stds.append(_spread(vals, use_median=False))
     else:
         sdn_rows = [
             r for r in rows
@@ -767,29 +1035,45 @@ def plot_routes_installed_handover(
             mean = _float(match[0].get("installed_mean"))
             if mean is None:
                 continue
-            xs.append(n)
-            ys.append(mean)
-            yerr.append(_float(match[0].get("installed_std")) or 0.0)
+            plot_nodes.append(n)
+            means.append(mean)
+            stds.append(_float(match[0].get("installed_std")) or 0.0)
 
-    if not xs:
+    if not plot_nodes:
         plt.close(fig)
-        print("  skip routes_installed_handover: no installed_mean values")
+        print("  skip routes_installed_handover: no installed values")
         return None
 
-    ax.errorbar(
-        xs, ys, yerr=yerr, marker="o", capsize=4, linewidth=2,
-        color=MODE_COLORS["sdn"], label="SDN routes installed (handover)",
+    x = np.arange(len(plot_nodes), dtype=float)
+    ax.bar(
+        x, means, width=0.6, yerr=stds, capsize=4,
+        color=MODE_COLORS["sdn"], alpha=0.55, edgecolor=MODE_COLORS["sdn"],
+        label="SDN routes installed (mean ± stddev)",
     )
+    # Overlay each repetition as a jittered dot.
+    rng = np.random.default_rng(0)
+    for i, n in enumerate(plot_nodes):
+        vals = per_node_values.get(n)
+        if not vals:
+            continue
+        xs = i + rng.uniform(-0.12, 0.12, size=len(vals))
+        ax.scatter(
+            xs, vals, s=16, color="black", alpha=0.6, zorder=4,
+            label="individual repetitions" if i == 0 else None,
+        )
+
     ax.set_xlabel("Constellation size (nodes)")
     ax.set_ylabel("Kernel routes pushed")
     ax.set_title("Incremental install size at first handover per run")
+    ax.set_xticks(x)
+    ax.set_xticklabels([str(n) for n in plot_nodes])
+    ax.set_ylim(bottom=0)
     ax.legend()
-    ax.grid(True, alpha=0.3)
-    if len(nodes) > 1:
-        ax.set_xticks(nodes)
+    ax.grid(True, axis="y", alpha=0.3)
     fig.text(
         0.5, -0.06,
-        "First proactive_handover event per rep (earliest time_index).",
+        "First proactive_handover event per rep (earliest time_index). "
+        "Bar = mean over repetitions; dots = individual runs.",
         ha="center", fontsize=8, style="italic",
     )
     fig.tight_layout()
@@ -833,6 +1117,14 @@ def generate_figures(
              "time_ms", "compute_ms", "install_ms", "installed"],
         )
 
+    ping_raw_path = os.path.join(results_dir, PING_RAW)
+    ping_raw_rows: Optional[List[dict]] = None
+    if os.path.isfile(ping_raw_path):
+        ping_raw_rows = read_table(
+            ping_raw_path,
+            ["nodes", "mode", "phase", "loss_pct", "avg_rtt_ms"],
+        )
+
     if "outage" in summaries:
         rows = read_table(
             summaries["outage"],
@@ -843,6 +1135,9 @@ def generate_figures(
             written.extend(paths)
 
     if raw_rows:
+        paths = plot_outage_ecdf(raw_rows, out_dir, dpi)
+        if paths:
+            written.extend(paths)
         paths = plot_outage_damage_recovery(raw_rows, out_dir, dpi)
         if paths:
             written.extend(paths)
@@ -853,10 +1148,10 @@ def generate_figures(
             ["nodes", "mode", "phase", "rtt_mean_ms", "rtt_std_ms",
              "loss_mean_pct", "loss_std_pct"],
         )
-        paths = plot_rtt_by_phase(rows, out_dir, dpi)
+        paths = plot_rtt_by_phase(rows, out_dir, dpi, raw_rows=ping_raw_rows)
         if paths:
             written.extend(paths)
-        paths = plot_loss_by_phase(rows, out_dir, dpi)
+        paths = plot_loss_by_phase(rows, out_dir, dpi, raw_rows=ping_raw_rows)
         if paths:
             written.extend(paths)
 
