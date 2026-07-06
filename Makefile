@@ -87,6 +87,7 @@ scale: ## Scale sweep from simulation.json (SCALE_REPS= overrides plan reps)
 		$(if $(SCALE_REPS),--reps $(SCALE_REPS),)
 
 plots: ## Journal figures from batch/scale CSVs (RESULTS=./scale_results)
+	$(PYTHON) experiments/classify_events.py --in-dir $(RESULTS) --artifacts-root .
 	$(PYTHON) experiments/plot_results.py --in-dir $(RESULTS) --out-dir $(FIGDIR)
 
 constellation-plot: ## Earth + LEO grid figure (ORBITS=10 SATS=10 → FIGDIR)
@@ -110,6 +111,7 @@ paper-clean: ## Remove paper CSVs (keeps README)
 	rm -f $(PAPER_OUT)/*.csv
 
 paper-plots: ## Figures from merged paper CSVs (PAPER_OUT=./scale_results_paper)
+	$(PYTHON) experiments/classify_events.py --in-dir $(PAPER_OUT) --artifacts-root .
 	$(PYTHON) experiments/plot_results.py --in-dir $(PAPER_OUT) --out-dir $(FIGDIR)
 
 paper-5x5: paper-init ## 5×5 × PAPER_REPS (default 10); fresh CSVs
