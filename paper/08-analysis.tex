@@ -233,9 +233,11 @@ reshape forwarding before a scheduled handover.
     OSPF (red) against OrbitGraph (blue).
     Each cell shows the distribution over repetitions as a violin (density),
     inner box (median and interquartile range), and one dot per repetition.
+    The panels use independent vertical scales, as recovery outages are far
+    smaller than damage outages.
     OrbitGraph does not outperform OSPF on these events: the SDN distribution
-    sits higher and wider because install latency extends the loss burst
-    relative to distributed reconvergence.}
+    sits higher and wider in both panels because centralized re-install extends
+    the loss burst relative to distributed local reconvergence.}
   \label{fig:outage-damage}
 \end{figure}
 
@@ -246,7 +248,8 @@ Both modes must recompute around a substantially changed $G_t$.
 OrbitGraph reacts with a full incremental reinstall (damage recovery),
 which blocks the synchronous emulation loop while thousands of routes are pushed.
 Median data-plane outage for SDN exceeds OSPF on several grids (e.g.,
-${\sim}26$\,s vs.\ ${\sim}2.4$\,s median on 102 nodes in the aggregated cohort).
+${\sim}18$\,s vs.\ ${\sim}0$\,s median on 102 nodes, where OSPF's redundant paths
+absorb the failure locally).
 
 Three factors explain this gap.
 Unlike GSL handover, damage is a reactive event: links fail before the
@@ -257,8 +260,13 @@ hundreds seen at handover.
 The same container southbound that Figure~\ref{fig:control-handover} shows at
 handover applies here without the compensating benefit of proactive link overlap.
 
-After recovery at $t{=}10$, both modes return to low outage on most grids;
-neither maintains a decisive advantage.
+The right panel shows link recovery at $t{=}10$ on an independent, smaller scale.
+OSPF returns to near-zero outage at every constellation size, whereas OrbitGraph
+again pays a re-install cost that produces sustained outage in a subset of
+repetitions at the larger grids, with individual runs reaching ${\sim}19$\,s and
+${\sim}29$\,s at 83 and 102 nodes.
+The asymmetry is the same as at damage: local reconvergence handles both the
+failure and its repair cheaply, while centralized bulk re-install does not.
 For unplanned failures, distributed protocols that converge locally, or SDN
 with a faster southbound and pipelined delta streaming, remain competitive
 with centralized graph recomputation~\cite{gregory:satellite-routing:2022}.
