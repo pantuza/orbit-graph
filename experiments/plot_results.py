@@ -749,7 +749,10 @@ def plot_outage_damage_recovery(
         print("  skip outage_damage_recovery: no raw damage_recovery rows")
         return None
 
-    fig, axes = plt.subplots(1, 2, figsize=(11, 4.8), sharey=True)
+    # Independent y-axes: recovery outages are much smaller than damage outages,
+    # and a shared scale would flatten the recovery panel into a single line at
+    # zero, hiding the OSPF-vs-SDN difference there.
+    fig, axes = plt.subplots(1, 2, figsize=(11, 4.8), sharey=False)
     left_ok = _plot_damage_panel(
         axes[0], raw_rows, DAMAGE_TIME, nodes,
         title=f"Link damage (t={DAMAGE_TIME})",
@@ -765,6 +768,7 @@ def plot_outage_damage_recovery(
         return None
 
     axes[0].set_ylabel("Data-plane outage (s)")
+    axes[1].set_ylabel("Data-plane outage (s)")
     handles = [
         plt.Line2D([0], [0], marker="o", linestyle="none",
                    color=MODE_COLORS["ospf"], label="OSPF"),
