@@ -13,11 +13,13 @@ recomputes shortest paths centrally and pushes only changed kernel routes
 Using container-based emulation from 27 to 100 satellites (including 2 ground stations), 
 we measure control-plane cost and data-plane availability with a continuous outage 
 probe aligned to routing events.
-At the first handover in each run, OrbitGraph yields 0\,ms mean data-plane outage
-while OSPF incurs multi-second black holes (up to 13.6\,s), maintains 0\% packet
-loss through the handover and post-handover phases on every grid size, and pushes
-576 kernel routes at the largest constellation versus 10\,504 at full initialization.
-Dijkstra recomputation remains in the millisecond range.
+On coverage-preserving handovers, OrbitGraph yields 0\,ms data-plane outage and
+0\% packet loss, while OSPF incurs multi-second black holes (up to ${\sim}15$\,s).
+OrbitGraph pushes 524 kernel routes at the largest constellation versus 10\,504
+at full initialization, and Dijkstra recomputation remains in the millisecond range.
+When the constellation is too sparse to keep a ground station in view, a coverage
+gap severs the ground-to-ground path for both protocols, bounding where
+control-plane update ordering helps.
 \end{abstract}
 
 \begin{IEEEkeywords}
