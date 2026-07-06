@@ -7,81 +7,98 @@ We analyze the scaling study ($5{\times}5$–$10{\times}10$, ten repetitions per
 grid and mode) along four axes: data-plane availability at GSL handover,
 phase-resolved reachability and latency, control-plane cost, and behavior under
 satellite failure.
-Unless noted, handover plots aggregate the \emph{first} GSL handover in each
-run so that statistics are not diluted by late-emulation events near teardown.
+Unless noted, each repetition contributes its worst outage among events of a
+given class, so statistics reflect the decisive event of that class rather than
+an incidental precursor near it.
 
 \subsection{Data-plane availability at GSL handover}
 \label{sec:analysis-handover}
 
+A continuous ICMP probe inside the source ground-station container measures
+sustained loss bursts aligned to control-plane events
+(Section~\ref{sec:experiments}); this metric captures downtime that
+tick-scheduled pings miss when route installation blocks the emulation loop.
+Not every topology change is the same physical event, so we classify each
+handover by the coverage state of the probed ground stations at the event tick.
+A \emph{coverage-preserving handover} swaps a ground station's serving satellite
+while a replacement is in view, so the post-handover graph $G_t$ exists in the
+delay matrix before the old contact is torn down. A \emph{coverage-gap event}
+leaves a ground station with no satellite in view, physically severing the
+ground-to-ground path; there is no replacement link to install, so the
+classification depends only on orbital geometry, not on the routing protocol.
+
 \begin{figure}[!h]
   \centering
-  \includegraphics[width=\linewidth]{figures/outage_vs_nodes.png}
-  \caption{Data-plane outage at the first GSL handover versus constellation
-    size ($N$ nodes), OSPF (red, topology-change events) against OrbitGraph
-    (blue, proactive handover).
-    Each cell shows the distribution over ten repetitions: the shaded violin is
-    the estimated density, the inner box marks the median and interquartile
-    range, and every dot is one repetition.
-    OSPF exhibits wide, multi-second black holes whose severity depends on
-    handover geometry; OrbitGraph collapses to a point mass at 0\,s (dots on the
-    baseline) on every grid where the first handover completes inside the
-    emulation window.}
+  \includegraphics[width=\linewidth]{figures/handover_classified.png}
+  \caption{Data-plane outage at GSL handover, classified by physical event type,
+    reported as the worst outage per run over ten repetitions, OSPF (red) against
+    OrbitGraph (blue).
+    Left: coverage-preserving handovers, where a replacement satellite is in
+    view; OrbitGraph holds 0\,s while OSPF reconverges for several seconds.
+    Right: coverage-gap events, where a ground station has no satellite in view;
+    both protocols black-hole because the path is physically severed.
+    Violin is the estimated density, the box marks median and interquartile
+    range, and each dot is one repetition. The two panels use different vertical
+    scales.}
   \label{fig:outage-handover}
 \end{figure}
 
 Figure~\ref{fig:outage-handover} is the central result of this work.
-A continuous ICMP probe inside the source ground-station container
-measures sustained loss bursts aligned to control-plane events
-(Section~\ref{sec:experiments}); this metric captures downtime that tick-scheduled
-pings miss when route installation blocks the emulation loop.
-
-\begin{figure}[!h]
-  \centering
-  \includegraphics[width=\linewidth]{figures/outage_ecdf.png}
-  \caption{Empirical cumulative distribution of first-handover data-plane
-    outage, pooling every repetition across all constellation sizes.
-    A curve reaching the top-left corner is better: it means most repetitions
-    finished the handover with little or no outage.
-    OrbitGraph (blue) rises vertically at 0\,s, so every repetition is seamless;
-    OSPF (red) spreads across seconds, with a tail extending beyond 13\,s.}
-  \label{fig:outage-ecdf}
-\end{figure}
-
-Figure~\ref{fig:outage-ecdf} pools every handover repetition into a single
-empirical cumulative distribution function.
-The two curves separate completely: OrbitGraph reaches unit probability at 0\,s,
-whereas roughly half of OSPF repetitions incur at least several seconds of
-outage and the worst reach the multi-second tail visible in
-Figure~\ref{fig:outage-handover}.
-
-At the first handover, OSPF data-plane outage is severe but varies
-non-monotonically with constellation size, because it depends on the geometry of
-which ground-satellite contact is torn down and how far the replacement path
-lies from the old one.
-It peaks at ${\sim}13.6$\,s on the $7{\times}7$ grid (51 nodes), with
-${\sim}5.7$\,s on $6{\times}6$ (38 nodes) and ${\sim}4.5$\,s on $5{\times}5$
-(27 nodes); on several larger grids the first handover happens not to disrupt
-the active path, and outage stays below one second
-(Figure~\ref{fig:outage-handover}).
-Where a black hole does occur, its duration corresponds to the interval between
-GSL teardown and BIRD/OSPF reconvergence: traffic is forwarded along stale or
-missing next-hops until link-state flooding completes~\cite{sidhu:ospf:1993}.
+On coverage-preserving handovers, OSPF data-plane outage ranges from
+${\sim}0.4$\,s on the $9{\times}9$ grid (83 nodes) to ${\sim}15$\,s on the
+$7{\times}7$ and $10{\times}10$ grids (51 and 102 nodes), with intermediate
+values of ${\sim}4.5$\,s and ${\sim}5.7$\,s on the $5{\times}5$ and $6{\times}6$
+grids.
+The severity does not grow monotonically with constellation size; it depends on
+how far the replacement path lies from the torn-down contact and therefore how
+much forwarding state OSPF must rebuild.
+Each black hole spans the interval between GSL teardown and BIRD/OSPF
+reconvergence: traffic follows stale or missing next-hops until link-state
+flooding completes~\cite{sidhu:ospf:1993}.
 
 OrbitGraph inverts this picture.
 By installing the post-handover FIB after new GSLs are added but \emph{before}
 old links are removed (Section~\ref{sec:proactive}), proactive handover yields
-0\,ms mean outage on every grid from 27 to 102 nodes, with zero sustained-down
-events across all 60 SDN repetitions in the handover cohort.
+0\,s outage on every coverage-preserving handover, across all fifty such
+repetitions and every grid size.
 The data plane stays up even though the container-based install itself takes
 seconds (Section~\ref{sec:analysis-control}): make-before-break at the topology
 level, not merely at the route-entry level, is what eliminates the black hole.
-
-This is the regime where graph-centric SDN is most effective: GSL handover times
-are known from orbital mechanics, the post-handover graph $G_t$ is available in
-the delay matrix before the old contact is torn down, and a centralized
-controller can commit forwarding for the new graph while both contacts briefly
-coexist, something distributed OSPF cannot do without protocol
+This is the regime where graph-centric SDN is most effective, because GSL
+handover times are known from orbital mechanics and a centralized controller can
+commit forwarding for the new graph while both contacts briefly coexist,
+something distributed OSPF cannot do without protocol
 extensions~\cite{pam:opspf:2019,gregory:satellite-routing:2022}.
+
+The right panel of Figure~\ref{fig:outage-handover} reports the boundary of that
+advantage. On the $8{\times}8$ grid (66 nodes), a probed ground station falls
+into a coverage gap during the handover window: with only 64 satellites the
+constellation is too sparse to keep a satellite in view over that location, so
+the ground-to-ground path is severed for tens of seconds. Both protocols incur a
+comparable multi-second-to-minute outage (median ${\sim}168$\,s for OSPF and
+${\sim}162$\,s for OrbitGraph), because make-before-break requires a replacement
+link to pre-install and a coverage gap offers none. This is a property of the
+constellation's physical coverage, not of the control plane, and it disappears
+in the denser topologies that keep continuous ground visibility.
+
+\begin{figure}[!h]
+  \centering
+  \includegraphics[width=\linewidth]{figures/outage_ecdf.png}
+  \caption{Empirical cumulative distribution of coverage-preserving handover
+    outage, pooling the worst such handover per repetition across all
+    constellation sizes.
+    A curve reaching the top-left corner is better: it means most repetitions
+    finished the handover with little or no outage.
+    OrbitGraph (blue) rises vertically at 0\,s, so every repetition is seamless;
+    OSPF (red) spreads across seconds, with a tail extending to ${\sim}15$\,s.}
+  \label{fig:outage-ecdf}
+\end{figure}
+
+Figure~\ref{fig:outage-ecdf} pools every coverage-preserving handover repetition
+into a single empirical cumulative distribution function.
+The two curves separate completely: OrbitGraph reaches unit probability at 0\,s,
+whereas OSPF spreads across the full range, with distinct clusters near
+${\sim}5$\,s and ${\sim}15$\,s that reflect the different handover geometries.
 
 
 \subsection{Reachability and latency across handover phases}
@@ -113,6 +130,9 @@ extensions~\cite{pam:opspf:2019,gregory:satellite-routing:2022}.
 Figure~\ref{fig:phase-metrics} complements
 Figure~\ref{fig:outage-handover} with scheduled probes at the handover tick,
 two seconds later, and near emulation end.
+These fixed-offset probes measure forwarding on coverage-preserving handovers;
+they do not sample the $8{\times}8$ coverage-gap window, whose sustained outage
+is captured only by the continuous probe of Figure~\ref{fig:outage-handover}.
 
 OrbitGraph achieves 0\% loss in the handover and post-handover phases on
 every grid size and in every repetition.
@@ -181,7 +201,7 @@ GSL disappears.
 Figure~\ref{fig:routes-handover} explains why install remains tractable.
 Incremental deltas (Section~\ref{sec:incremental}) push only changed next-hops:
 ${\sim}109$ routes at the first handover on $5{\times}5$, rising to
-${\sim}576$ on $10{\times}10$, roughly 20$\times$ fewer programming
+${\sim}524$ on $10{\times}10$, roughly 20$\times$ fewer programming
 operations than the ${\sim}10{,}504$ routes required at initialization.
 Without incremental install, every handover would replay a full-table push and
 amplify the install-time penalty without improving availability.
@@ -265,7 +285,8 @@ and showing no advantage under bulk failure injection with our current install p
     \hline
     Scenario & OSPF & OrbitGraph & Comment \\
     \hline
-    GSL handover outage      & Multi-second & 0\,ms & Proactive install \\
+    Coverage-preserving handover & 0.4--15\,s & 0\,ms & Proactive install \\
+    Coverage-gap event       & ${\sim}168$\,s & ${\sim}162$\,s & Path severed; no window \\
     Handover/post-HO loss    & Up to 100\% & 0\% & Fig.~\ref{fig:phase-metrics} \\
     Steady-state RTT         & Similar & Similar & Same LeastDelay paths \\
     Dijkstra compute         & n/a & 1–13\,ms & Scales mildly \\
