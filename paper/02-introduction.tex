@@ -52,11 +52,12 @@ $G_t$; an incremental, make-before-break FIB install that programs only changed
 next-hops, reducing handover updates by roughly two orders of magnitude relative
 to a full-table push; a proactive handover mechanism that commits the new
 forwarding state while both contacts briefly coexist; and an empirical study
-showing 0\,ms mean data-plane outage at GSL handover where OSPF incurs
-multi-second black holes, 0\% packet loss through the handover phases on every
-grid size, and millisecond-range shortest-path recomputation, together with
-measurement of the regime where centralized install does not yet outperform
-distributed reconvergence under unplanned bulk failure.
+showing 0\,ms data-plane outage on coverage-preserving GSL handovers where OSPF
+incurs multi-second black holes, alongside millisecond-range shortest-path
+recomputation, together with a characterization of the boundaries of the
+approach: a satellite coverage gap that severs the path for both protocols, and
+unplanned bulk failure where centralized install does not yet outperform
+distributed reconvergence.
 
 OrbitGraph differs from prior LEO routing along a single axis: \emph{what}
 forwarding state to install and \emph{when} relative to link lifetime.
