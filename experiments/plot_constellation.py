@@ -241,8 +241,10 @@ def render_constellation(
     )
 
     n_sats = orbits * sats_per_orbit
+    # Two lines keep the (long) title within the compact figure width so it is
+    # not clipped on the left or right when the canvas is cropped on save.
     title_plain = (
-        f"{orbits}×{sats_per_orbit} LEO constellation "
+        f"{orbits}×{sats_per_orbit} LEO constellation\n"
         f"({n_sats} satellites, {altitude_km:.0f} km, "
         f"{inclination_deg:.0f}° inclination)"
     )
@@ -296,7 +298,7 @@ def render_constellation(
     ax.set_xlim(-lim, lim)
     ax.set_ylim(-lim, lim)
 
-    fig.text(0.5, 0.97, title_plain, ha="center", va="top", fontsize=10.0)
+    fig.text(0.5, 0.99, title_plain, ha="center", va="top", fontsize=11.0)
     fig.legend(
         handles=[
             plt.Line2D(
@@ -313,7 +315,7 @@ def render_constellation(
         loc="lower center",
         bbox_to_anchor=(0.5, 0.01),
         ncol=2,
-        fontsize=8.5,
+        fontsize=10.0,
         frameon=False,
         handletextpad=0.4,
         columnspacing=1.2,
@@ -327,7 +329,8 @@ def render_constellation(
             path,
             dpi=dpi if ext == "png" else None,
             facecolor="white",
-            pad_inches=0,
+            bbox_inches="tight",
+            pad_inches=0.05,
         )
         paths.append(path)
     plt.close(fig)
