@@ -27,7 +27,7 @@ leaves a ground station with no satellite in view, physically severing the
 ground-to-ground path; there is no replacement link to install, so the
 classification depends only on orbital geometry, not on the routing protocol.
 
-\begin{figure}[!h]
+\begin{figure*}[!t]
   \centering
   \includegraphics[width=\linewidth]{figures/handover_classified.png}
   \caption{Data-plane outage at GSL handover, classified by physical event type,
@@ -41,7 +41,7 @@ classification depends only on orbital geometry, not on the routing protocol.
     range, and each dot is one repetition. The two panels use different vertical
     scales.}
   \label{fig:outage-handover}
-\end{figure}
+\end{figure*}
 
 Figure~\ref{fig:outage-handover} is the central result of this work.
 On coverage-preserving handovers, OSPF data-plane outage ranges from
@@ -226,7 +226,7 @@ reshape forwarding before a scheduled handover.
 \subsection{Resilience under satellite failure}
 \label{sec:analysis-damage}
 
-\begin{figure}[!t]
+\begin{figure*}[!t]
   \centering
   \includegraphics[width=\linewidth]{figures/outage_damage_recovery.png}
   \caption{Data-plane outage after link damage ($t{=}5$) and recovery ($t{=}10$),
@@ -239,7 +239,7 @@ reshape forwarding before a scheduled handover.
     sits higher and wider in both panels because centralized re-install extends
     the loss burst relative to distributed local reconvergence.}
   \label{fig:outage-damage}
-\end{figure}
+\end{figure*}
 
 Figure~\ref{fig:outage-damage} presents a contrasting result, the
 regime where OrbitGraph is not the better option in our current implementation.
