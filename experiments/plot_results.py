@@ -42,6 +42,12 @@ CLASS_LABELS = {
 }
 
 PHASE_ORDER = ("post_init", "handover", "post_handover", "steady")
+PHASE_TITLES = {
+    "post_init": "Post-init",
+    "handover": "Handover",
+    "post_handover": "Post-handover",
+    "steady": "Steady",
+}
 MODE_COLORS = {"ospf": "#d62728", "sdn": "#1f77b4"}
 MODE_LABELS = {"ospf": "OSPF", "sdn": "SDN"}
 
@@ -849,8 +855,7 @@ def _plot_phase_violin(
                     ax, i + offset, sdn, MODE_COLORS["sdn"],
                     width=0.34, seed=n + 1,
                 )
-        ax.set_title(phase.replace("_", " "))
-        ax.set_xlabel("nodes")
+        ax.set_title(PHASE_TITLES.get(phase, phase.replace("_", " ").title()))
         ax.set_xticks(range(len(nodes)))
         ax.set_xticklabels([str(n) for n in nodes])
         ax.grid(True, axis="y", alpha=0.3)
@@ -871,6 +876,7 @@ def _plot_phase_violin(
     ]
     axes[0, -1].legend(handles=handles, loc="best")
     fig.suptitle(title, y=1.02)
+    fig.supxlabel("Constellation size (nodes)")
     fig.tight_layout()
     return _save_figure(fig, out_dir, stem, dpi)
 
