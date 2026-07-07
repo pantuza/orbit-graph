@@ -63,6 +63,18 @@ def _import_matplotlib():
             file=sys.stderr,
         )
         raise SystemExit(1) from exc
+    # Consistent, paper-legible typography across every figure. Sizes are chosen
+    # so that titles, axis labels, ticks, and legends remain readable after the
+    # figure is scaled to column (or text) width in the two-column IEEE layout.
+    plt.rcParams.update({
+        "font.size": 14,
+        "axes.titlesize": 16,
+        "axes.labelsize": 15,
+        "xtick.labelsize": 13,
+        "ytick.labelsize": 13,
+        "legend.fontsize": 13,
+        "figure.titlesize": 17,
+    })
     return plt
 
 
@@ -363,7 +375,7 @@ def plot_outage_vs_nodes(
             print("  skip outage_vs_nodes: no handover outage rows")
             return None
 
-        fig, ax = plt.subplots(figsize=(7.5, 4.5))
+        fig, ax = plt.subplots(figsize=(6.0, 4.2))
         offset = 0.2
         for i, n in enumerate(nodes):
             _draw_violin_box_strip(
@@ -384,7 +396,7 @@ def plot_outage_vs_nodes(
         ]
         ax.legend(handles=handles, loc="upper left")
     else:
-        fig, ax = plt.subplots(figsize=(7, 4.5))
+        fig, ax = plt.subplots(figsize=(6.0, 4.2))
         any_data = False
         series = [
             ("ospf", OSPF_HANDOVER_OUTAGE, "OSPF (topology change)"),
@@ -424,12 +436,6 @@ def plot_outage_vs_nodes(
     ax.set_title("Handover black-hole duration — first handover per run")
     ax.set_ylim(bottom=-0.3)
     ax.grid(True, axis="y", alpha=0.3)
-    fig.text(
-        0.5, -0.06,
-        "Distribution over ten repetitions (violin=density, box=median/IQR, "
-        "dots=each rep). Earliest handover event per rep.",
-        ha="center", fontsize=8, style="italic",
-    )
     fig.tight_layout()
     return _save_figure(fig, out_dir, "outage_vs_nodes", dpi)
 
@@ -483,7 +489,7 @@ def plot_outage_ecdf(
         print("  skip outage_ecdf: no handover outage rows")
         return None
 
-    fig, ax = plt.subplots(figsize=(7, 4.5))
+    fig, ax = plt.subplots(figsize=(6.0, 4.2))
     for arr, mode, label in (
         (ospf, "ospf", "OSPF (topology change)"),
         (sdn, "sdn", "SDN (proactive handover)"),
@@ -499,19 +505,11 @@ def plot_outage_ecdf(
 
     ax.set_xlabel("Data-plane outage at handover (s)")
     ax.set_ylabel("Fraction of handover repetitions")
-    ax.set_title("Coverage-preserving handover outage ECDF (all sizes pooled)"
-                 if class_map else
-                 "Handover outage ECDF (all constellation sizes pooled)")
+    ax.set_title("Handover outage ECDF")
     ax.set_ylim(0, 1.02)
     ax.set_xlim(left=-0.2)
     ax.grid(True, alpha=0.3)
     ax.legend(loc="lower right")
-    fig.text(
-        0.5, -0.04,
-        "Curve further left is better. SDN reaches 1.0 at 0 s (no black hole); "
-        "OSPF's tail extends to multi-second outages.",
-        ha="center", fontsize=8, style="italic",
-    )
     fig.tight_layout()
     return _save_figure(fig, out_dir, "outage_ecdf", dpi)
 
@@ -586,7 +584,7 @@ def _plot_class_panel(
             any_data = True
             _draw_violin_box_strip(
                 ax, i + offset, sdn, MODE_COLORS["sdn"], width=0.34, seed=n + 1)
-    ax.set_title(title, fontsize=10)
+    ax.set_title(title)
     ax.set_xlabel("Constellation size (nodes)")
     ax.set_xticks(range(len(nodes)))
     ax.set_xticklabels([str(n) for n in nodes])
@@ -621,24 +619,27 @@ def plot_handover_classified(
 
     have_gap = bool(gap_nodes)
     ncols = 2 if have_gap else 1
-    widths = [max(1, len(ho_nodes)), max(1, len(gap_nodes))] if have_gap else [1]
+    # Give the coverage-gap panel enough relative width that its (wrapped) title
+    # clears the axis and its y-label, even when it holds a single node group.
+    widths = ([len(ho_nodes), max(3, len(gap_nodes) + 2)] if have_gap else [1])
+    fig_w = (1.25 * sum(widths) + 1.6) if have_gap else (4.2 + 1.1 * len(ho_nodes))
     fig, axes = plt.subplots(
-        1, ncols, figsize=(4.2 + 1.1 * (len(ho_nodes) + len(gap_nodes)), 4.5),
+        1, ncols, figsize=(fig_w, 4.6),
         gridspec_kw={"width_ratios": widths}, squeeze=False,
     )
 
     any_data = _plot_class_panel(
         axes[0][0], agg, ho_nodes, "handover",
-        title="Coverage-preserving GSL handovers",
+        title="Coverage-preserving handovers",
     )
-    axes[0][0].set_ylabel("Worst data-plane outage per run (s)")
+    axes[0][0].set_ylabel("Worst outage per run (s)")
 
     if have_gap:
         any_data |= _plot_class_panel(
             axes[0][1], agg, gap_nodes, "coverage_gap",
-            title="Coverage-gap events (no satellite in view)",
+            title="Coverage-gap events\n(no satellite in view)",
         )
-        axes[0][1].set_ylabel("Worst data-plane outage per run (s)")
+        axes[0][1].set_ylabel("Worst outage per run (s)")
 
     if not any_data:
         plt.close(fig)
@@ -653,18 +654,10 @@ def plot_handover_classified(
     ]
     axes[0][0].legend(handles=handles, loc="upper left")
     fig.suptitle(
-        "Handover outage by event class (worst event per run, ten repetitions)",
-        y=1.01,
+        "Handover outage by event class",
+        y=1.02,
     )
-    fig.text(
-        0.5, -0.04,
-        "Violin=density, box=median/IQR, dots=each repetition. "
-        "On coverage-preserving handovers OrbitGraph holds 0 s while OSPF "
-        "reconverges for seconds; a coverage gap severs the path physically, so "
-        "both protocols black-hole.",
-        ha="center", fontsize=8, style="italic", wrap=True,
-    )
-    fig.tight_layout()
+    fig.tight_layout(w_pad=2.5)
     return _save_figure(fig, out_dir, "handover_classified", dpi)
 
 
@@ -777,16 +770,8 @@ def plot_outage_damage_recovery(
     ]
     axes[1].legend(handles=handles, loc="best")
     fig.suptitle(
-        "Link failure scenario (not handover): SDN full FIB reinstall vs OSPF local convergence",
-        y=1.04, fontsize=11,
-    )
-    fig.text(
-        0.5, -0.02,
-        "Distribution over repetitions (violin=density, box=median/IQR, dots=each rep). "
-        "SDN outage during damage includes centralized route push to all containers; "
-        "proactive handover instead uses incremental install with zero black hole "
-        "(outage_vs_nodes).",
-        ha="center", fontsize=8, style="italic", wrap=True,
+        "Link failure: SDN reinstall vs OSPF convergence",
+        y=1.02,
     )
     fig.tight_layout()
     return _save_figure(fig, out_dir, "outage_damage_recovery", dpi)
@@ -843,7 +828,7 @@ def _plot_phase_violin(
         return None
 
     fig, axes = plt.subplots(
-        1, len(phases), figsize=(3.4 * len(phases), 4.2),
+        1, len(phases), figsize=(3.0 * len(phases), 4.0),
         sharey=True, squeeze=False,
     )
     offset = 0.2
@@ -983,7 +968,7 @@ def plot_rtt_by_phase(
             raw_rows, out_dir, dpi,
             value_key="avg_rtt_ms",
             ylabel="RTT (ms)",
-            title="Ping RTT by phase (distribution over repetitions)",
+            title="Ping RTT by phase",
             stem="rtt_by_phase",
         )
     return _plot_by_phase(
@@ -1008,7 +993,7 @@ def plot_loss_by_phase(
             raw_rows, out_dir, dpi,
             value_key="loss_pct",
             ylabel="Packet loss (%)",
-            title="Ping loss by phase (distribution over repetitions)",
+            title="Ping loss by phase",
             stem="loss_by_phase",
             ylim=(-5, 105),
         )
@@ -1112,7 +1097,7 @@ def plot_control_handover(
 
     x = np.arange(len(plot_nodes), dtype=float)
     width = 0.25
-    fig, ax = plt.subplots(figsize=(8, 4.8))
+    fig, ax = plt.subplots(figsize=(6.4, 4.3))
 
     ospf_arr = np.array(ospf_y, dtype=float)
     comp_arr = np.array(compute_y, dtype=float)
@@ -1133,12 +1118,12 @@ def plot_control_handover(
     )
 
     ax.set_yscale("log")
-    ax.set_ylabel("Control-plane time at handover (ms, log scale)")
+    ax.set_ylabel("Control-plane time (ms, log scale)")
     ax.set_xlabel("Constellation size (nodes)")
-    ax.set_title("Handover control-plane cost (first handover per run)")
+    ax.set_title("Control-plane cost at handover")
     ax.set_xticks(x)
     ax.set_xticklabels([str(n) for n in plot_nodes])
-    ax.legend(loc="upper left")
+    ax.legend(loc="upper left", framealpha=1.0)
     ax.grid(True, axis="y", which="both", alpha=0.3)
 
     # Label bars when tall enough to read; always label tiny compute bars.
@@ -1156,17 +1141,9 @@ def plot_control_handover(
                     f"{val:.0f}" if val >= 10 else f"{val:.1f}",
                     xy=(bar.get_x() + bar.get_width() / 2, height),
                     xytext=(0, 3), textcoords="offset points",
-                    ha="center", va="bottom", fontsize=7,
+                    ha="center", va="bottom", fontsize=10,
                 )
 
-    fig.text(
-        0.5, -0.08,
-        "OSPF has no route-install step (route dump only, ~10² ms). "
-        "SDN install (docker-exec push, ~10³–10⁴ ms) dominates control-plane time "
-        "but keeps the data plane up during proactive handover — see outage_vs_nodes "
-        "(0 s black hole vs multi-second OSPF gaps).",
-        ha="center", fontsize=8, style="italic", wrap=True,
-    )
     fig.tight_layout()
     return _save_figure(fig, out_dir, "control_handover", dpi)
 
@@ -1186,7 +1163,7 @@ def plot_routes_installed_handover(
 
     import numpy as np
 
-    fig, ax = plt.subplots(figsize=(7, 4.5))
+    fig, ax = plt.subplots(figsize=(6.0, 4.2))
     plot_nodes: List[int] = []
     means: List[float] = []
     stds: List[float] = []
@@ -1253,18 +1230,12 @@ def plot_routes_installed_handover(
 
     ax.set_xlabel("Constellation size (nodes)")
     ax.set_ylabel("Kernel routes pushed")
-    ax.set_title("Incremental install size at first handover per run")
+    ax.set_title("Routes installed at handover")
     ax.set_xticks(x)
     ax.set_xticklabels([str(n) for n in plot_nodes])
     ax.set_ylim(bottom=0)
     ax.legend()
     ax.grid(True, axis="y", alpha=0.3)
-    fig.text(
-        0.5, -0.06,
-        "First proactive_handover event per rep (earliest time_index). "
-        "Bar = mean over repetitions; dots = individual runs.",
-        ha="center", fontsize=8, style="italic",
-    )
     fig.tight_layout()
     return _save_figure(fig, out_dir, "routes_installed_handover", dpi)
 
