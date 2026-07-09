@@ -112,35 +112,35 @@ ${\sim}5$\,s and ${\sim}15$\,s that reflect the different handover geometries.
 \subsection{Reachability and latency across handover phases}
 \label{sec:analysis-dataplane}
 
-\begin{figure*}[!t]
-  \centering
-  \includegraphics[width=\linewidth]{figures/loss_by_phase.png}\\[0.3ex]
-  {\footnotesize (a)}\\[0.8ex]
-  \includegraphics[width=\linewidth]{figures/rtt_by_phase.png}\\[0.3ex]
-  {\footnotesize (b)}
-  \caption{End-to-end ground-station ping metrics by handover-relative phase,
-    OSPF (red) against OrbitGraph (blue).
-    Each cell shows the distribution over ten repetitions as a violin (density),
-    inner box (median and interquartile range), and one dot per repetition.
-    (a)~Loss; (b)~RTT.
-    OrbitGraph holds 0\% loss through handover and post-handover on all grid
-    sizes (dots on the baseline); OSPF loss is bimodal during reconvergence,
-    with repetitions clustering at either 0\% or 100\% rather than at the mean.}
-  \label{fig:phase-metrics}
-\end{figure*}
-
-Figure~\ref{fig:phase-metrics} complements
+Figures~\ref{fig:loss-by-phase} and~\ref{fig:rtt-by-phase} complement
 Figure~\ref{fig:outage-preserving} with scheduled probes at the handover tick,
 two seconds later, and near emulation end.
 These fixed-offset probes measure forwarding on coverage-preserving handovers;
 they do not sample the $8{\times}8$ coverage-gap window, whose sustained outage
 is captured only by the continuous probe of Figure~\ref{fig:outage-gap}.
 
+Figure~\ref{fig:loss-by-phase} resolves packet loss by phase.
 OrbitGraph achieves 0\% loss in the handover and post-handover phases on
 every grid size and in every repetition.
 OSPF loss is phase-dependent and, more importantly, bimodal across repetitions:
 the distribution view shows that a handover either forwards cleanly (0\%) or is
 fully black-holed (100\%), with few intermediate outcomes.
+
+\begin{figure}[!ht]
+  \centering
+  \includegraphics[width=\linewidth]{figures/loss_by_phase.png}
+  \caption{End-to-end ground-station packet loss by handover-relative phase,
+    OSPF (red) against OrbitGraph (blue).
+    Each panel is one phase; within a panel, OSPF and OrbitGraph violins sit
+    side by side at every constellation size, showing the distribution over ten
+    repetitions as a violin (density), inner box (median and interquartile
+    range), and one dot per repetition.
+    OrbitGraph holds 0\% loss through handover and post-handover on all grid
+    sizes (dots on the baseline); OSPF loss is bimodal during reconvergence,
+    with repetitions clustering at either 0\% or 100\% rather than at the mean.}
+  \label{fig:loss-by-phase}
+\end{figure}
+
 On $6{\times}6$ the handover phase splits between these extremes, so the
 50\% mean reported by a summary statistic corresponds to no single repetition;
 on $7{\times}7$ the handover and post-handover phases sit at 100\% loss because
@@ -148,6 +148,19 @@ the path is black-holed until OSPF settles.
 After convergence (steady phase), OSPF recovers to 0\% loss; both modes
 eventually forward correctly once the distributed database catches up.
 
+\begin{figure*}[!t]
+  \centering
+  \includegraphics[width=0.8\linewidth]{figures/rtt_by_phase.png}
+  \caption{End-to-end ground-station ping RTT by handover-relative phase,
+    OSPF (red) against OrbitGraph (blue).
+    Each panel is one phase; within a panel, OSPF and OrbitGraph violins sit
+    side by side at every constellation size, showing the distribution over ten
+    repetitions as a violin (density), inner box (median and interquartile
+    range), and one dot per repetition.}
+  \label{fig:rtt-by-phase}
+\end{figure*}
+
+Figure~\ref{fig:rtt-by-phase} resolves latency by phase.
 When OrbitGraph keeps the path up, handover-phase RTT reflects the new
 shortest path immediately (e.g., ${\sim}380$\,ms on $7{\times}7$ where the
 post-handover route is longer).
@@ -158,7 +171,8 @@ ${\sim}236$\,ms on $10{\times}10$), confirming that OrbitGraph does not
 degrade steady-state path quality; it changes when the new path becomes
 usable, not which shortest path is chosen.
 
-Together, Figures~\ref{fig:outage-preserving} and~\ref{fig:phase-metrics}
+Together, Figures~\ref{fig:outage-preserving}, \ref{fig:loss-by-phase},
+and~\ref{fig:rtt-by-phase}
 show that SDN's advantage is not raw steady-state performance but
 continuity through predictable topology mutations, the defining challenge
 of LEO graph dynamics~\cite{kassing2020exploring,handley:ground-relays:2019}.
@@ -193,7 +207,6 @@ Figure~\ref{fig:outage-preserving} shows in the data plane.
 OrbitGraph's install bar reflects our container southbound harness;
 a production SDN plane (gRPC, NETCONF, or on-board agents receiving compressed
 deltas) would shrink install time while preserving the same FIB semantics.
-
 Crucially, heavy install does not imply heavy data-plane outage when
 updates are ordered proactively: the continuous probe in
 Figure~\ref{fig:outage-preserving} shows 0\,s black hole even while install runs,
@@ -230,7 +243,7 @@ reshape forwarding before a scheduled handover.
 
 \begin{figure*}[!t]
   \centering
-  \includegraphics[width=\linewidth]{figures/outage_damage_recovery.png}
+  \includegraphics[width=0.7\linewidth]{figures/outage_damage_recovery.png}
   \caption{Data-plane outage after link damage ($t{=}5$) and recovery ($t{=}10$),
     OSPF (red) against OrbitGraph (blue).
     Each cell shows the distribution over repetitions as a violin (density),
@@ -297,7 +310,7 @@ and showing no advantage under bulk failure injection with our current install p
     \hline
     Coverage-preserving handover & 0.4--15\,s & 0\,ms & Proactive install \\
     Coverage-gap event       & ${\sim}168$\,s & ${\sim}162$\,s & Path severed; no window \\
-    Handover/post-HO loss    & Up to 100\% & 0\% & Fig.~\ref{fig:phase-metrics} \\
+    Handover/post-HO loss    & Up to 100\% & 0\% & Fig.~\ref{fig:loss-by-phase} \\
     Steady-state RTT         & Similar & Similar & Same LeastDelay paths \\
     Dijkstra compute         & n/a & 1–13\,ms & Scales mildly \\
     Route push at handover   & n/a & ${\sim}10^2$–$10^3$ routes & vs.\ ${\sim}10^4$ init \\
@@ -314,4 +327,3 @@ Distributed OSPF remains a robust default for unplanned churn and for networks
 without a trusted global view; OrbitGraph shows that when the LEO network is
 a dynamic graph with known handover schedules, centralized shortest-path control
 can keep that graph connected in the data plane through every contact change.
-
