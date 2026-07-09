@@ -807,12 +807,15 @@ def _plot_phase_violin(
     title: str,
     stem: str,
     ylim: Optional[Tuple[float, float]] = None,
+    ncols: Optional[int] = None,
 ) -> Optional[List[str]]:
     """Per-phase distribution (violin+box+strip) of a ping metric vs size.
 
     One panel per handover-relative phase; within each panel, OSPF and SDN
     violins sit side by side at every constellation size. Distribution view
     reveals bimodal OSPF loss (0% or 100%) that a mean would blur.
+    Panels lay out in a single row by default; pass ``ncols`` to wrap them into
+    a grid (e.g. ``ncols=2`` for a 2x2 block that fits a two-column page).
     """
     plt = _import_matplotlib()
 
@@ -828,13 +831,17 @@ def _plot_phase_violin(
         print(f"  skip {stem}: no phase rows")
         return None
 
+    ncols_eff = ncols or len(phases)
+    nrows = (len(phases) + ncols_eff - 1) // ncols_eff
+    figsize = ((3.0 * ncols_eff, 4.0) if nrows == 1
+               else (3.4 * ncols_eff, 3.2 * nrows))
     fig, axes = plt.subplots(
-        1, len(phases), figsize=(3.0 * len(phases), 4.0),
-        sharey=True, squeeze=False,
+        nrows, ncols_eff, figsize=figsize, sharey=True, squeeze=False,
     )
+    flat = [ax for row in axes for ax in row]
     offset = 0.2
     any_data = False
-    for ax, phase in zip(axes[0], phases):
+    for ax, phase in zip(flat, phases):
         for i, n in enumerate(nodes):
             ospf = _phase_values(raw_rows, value_key, n, "ospf", phase)
             sdn = _phase_values(raw_rows, value_key, n, "sdn", phase)
@@ -855,21 +862,25 @@ def _plot_phase_violin(
         ax.set_xticklabels([str(n) for n in nodes])
         ax.grid(True, axis="y", alpha=0.3)
 
+    for ax in flat[len(phases):]:
+        ax.set_visible(False)
+
     if not any_data:
         plt.close(fig)
         print(f"  skip {stem}: no plottable values")
         return None
 
-    axes[0, 0].set_ylabel(ylabel)
+    for row in axes:
+        row[0].set_ylabel(ylabel)
     if ylim is not None:
-        axes[0, 0].set_ylim(*ylim)
+        axes[0][0].set_ylim(*ylim)
     handles = [
         plt.Line2D([0], [0], marker="o", linestyle="none",
                    color=MODE_COLORS["ospf"], label="OSPF"),
         plt.Line2D([0], [0], marker="o", linestyle="none",
                    color=MODE_COLORS["sdn"], label="SDN"),
     ]
-    axes[0, -1].legend(handles=handles, loc="best")
+    flat[len(phases) - 1].legend(handles=handles, loc="best")
     fig.suptitle(title, y=1.02)
     fig.supxlabel("Constellation size (nodes)")
     fig.tight_layout()
@@ -997,6 +1008,7 @@ def plot_loss_by_phase(
             title="Ping loss by phase",
             stem="loss_by_phase",
             ylim=(-5, 105),
+            ncols=2,
         )
     return _plot_by_phase(
         rows, out_dir, dpi,
