@@ -62,6 +62,11 @@ perform poorly in dynamic satellite scenarios~\cite{ns3leo2022}.
 OrbitGraph exploits the opposite assumption: topology is predictable from
 SGP4-based delay matrices, so a centralized graph controller is feasible.
 
+A recent robustness study shows that inter-satellite link failures from
+environmental and load factors degrade static routing far more than dynamic or
+distributed approaches~\cite{yang:leo-routing-resilience:2025}, motivating the
+failure-mode analysis we report for OrbitGraph under satellite damage.
+
 \subsection{SDN and graph-based network management}
 
 The SDN paradigm separates control and data planes and enables programmatic
@@ -82,6 +87,13 @@ Both optimize control placement and treat forwarding as a black box, whereas
 OrbitGraph addresses what routes to install and when relative to link lifetime,
 evaluating data-plane availability during handover rather than switch-controller
 latency.
+
+Centralized traffic engineering has also been applied to satellite backbones,
+where a controller computes low-latency routes across a time-varying topology to
+meet flow-level objectives~\cite{wu:sate-satellite-te:2025}.
+That work optimizes path selection and load balancing at the traffic-matrix
+level, whereas OrbitGraph targets per-handover forwarding continuity measured as
+data-plane outage on emulated nodes.
 
 \subsection{Simulation and emulation platforms}
 
@@ -107,6 +119,12 @@ StarryNet~\cite{lai2023starrynet} emulates real TCP/IP and OSPF in containers
 and is our evaluation harness, which OrbitGraph extends with a centralized
 controller, incremental kernel route install, and proactive handover
 (Section~\ref{sec:simulation}).
+A recent review of LEO/NTN routing spanning classical, learning-based, and
+quantum methods finds the evidence base predominantly simulation-driven, with
+limited testbed or emulation support and often simplified control-plane
+realism~\cite{mattar:leo-ntn-routing-perspectives:2026}, a gap OrbitGraph
+addresses by evaluating real kernel forwarding under a centralized controller in
+container emulation.
 
 \subsection{Broader LEO networking literature}
 
@@ -115,7 +133,9 @@ connectivity~\cite{smallsats2020,asri2024swarm,farrag:swarm-survey:2021}.
 Swarm intelligence frameworks~\cite{chen2022swarm} and formation control
 studies~\cite{fangchen2022pdg} address mission-layer coordination, not IP
 handover, and machine-learning routing is surveyed with emphasis on model design
-and deployment~\cite{zhu:ml-routing-survey:2025}.
+and deployment~\cite{zhu:ml-routing-survey:2025}, with recent work applying deep
+graph reinforcement learning to routing on large-scale LEO
+topologies~\cite{huang:graph-rl-leo-routing:2026}.
 An earlier environment for distributed routing analysis in LEO
 swarms~\cite{online:silleo-routing:2025} compared conventional protocols without
 a centralized proactive strategy.
