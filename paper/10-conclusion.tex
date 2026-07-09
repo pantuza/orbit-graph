@@ -4,29 +4,28 @@
 \label{sec:conclusion}
 
 Low Earth orbit mega-constellations are, at their core, dynamic graphs:
-vertices are satellites and ground assets, edges appear and vanish as orbital
-geometry evolves, and edge weights track propagation delay and link capacity.
-Routing in this environment is not a one-time shortest-path problem but a
-continuous sequence of graph snapshots $G_t$ that must be reflected in the
+vertices are satellites and ground assets, and edges appear and vanish as
+orbital geometry evolves. Routing here is not a one-time shortest-path problem
+but a continuous sequence of graph snapshots $G_t$ that must reach the
 forwarding plane faster than contacts change.
-Distributed link-state protocols such as OSPF were designed for networks whose
-topology changes sporadically; they discover mutations reactively and
-reconverge after the fact, which our measurements show can black-hole traffic
-for many seconds at each ground--satellite handover.
+Distributed link-state protocols such as OSPF were designed for topologies that
+change sporadically. They discover mutations reactively and reconverge after the
+fact, which our measurements show can black-hole traffic for many seconds at
+each ground--satellite handover.
 
 Software-defined networking offers a different contract.
 By decoupling the control plane from the data plane, OrbitGraph
 centralizes graph construction from ephemeris-driven delay
 matrices and multi-source Dijkstra while leaving forwarding to the
 existing Linux kernel on each node.
-The data plane executes simple, fast operations (longest-prefix match, local
-delivery); the control plane owns global visibility, policy, and when
-updates land relative to link lifetime.
-That separation is efficient in two senses: algorithmically, because
-recomputation stays in the millisecond range even at 102 nodes; operationally,
-because only changed next-hops are programmed (${\sim}10^2$–$10^3$ routes at
-handover versus ${\sim}10^4$ at initialization), avoiding the cost of
-re-flooding a full link-state database to every router on every orbital tick.
+The data plane executes simple, fast operations such as longest-prefix match
+and local delivery, while the control plane owns global visibility, policy, and
+when updates land relative to link lifetime.
+That separation is efficient in two senses. Algorithmically, recomputation stays
+in the millisecond range even at 102 nodes. Operationally, only changed
+next-hops are programmed, ${\sim}10^2$–$10^3$ routes at handover versus
+${\sim}10^4$ at initialization, avoiding the cost of re-flooding a full
+link-state database to every router on every orbital tick.
 
 The decisive advantage, however, is not raw compute speed but control
 over update ordering.
@@ -35,35 +34,35 @@ new ground--satellite links coexist, make-before-break at the topology level.
 Distributed OSPF cannot match that behavior without protocol extensions,
 because no single router observes the full mutation schedule in advance.
 Our container-based evaluation on StarryNet~\cite{lai2023starrynet}, spanning
-27 to 102 nodes with ten repetitions per configuration, shows 0\,ms data-plane
-outage on every coverage-preserving GSL handover versus multi-second OSPF black
-holes (up to ${\sim}15$\,s), 0\% packet loss through handover and post-handover
-phases under OrbitGraph while OSPF loss reaches 100\% on several grids during
-reconvergence, comparable steady-state latency once both modes settle, and
-incremental graph updates that keep programmatic cost proportional to handover
-scope rather than constellation size. Where the constellation is too sparse to
-keep a ground station in view, a coverage gap severs the path for both protocols,
-delimiting the regime in which control-plane ordering is decisive.
+27 to 102 nodes over ten repetitions, shows 0\,ms data-plane
+outage on every coverage-preserving GSL handover against OSPF black holes
+reaching ${\sim}15$\,s, 0\% packet loss through handover and post-handover under
+OrbitGraph while OSPF loss reaches 100\% on several grids, comparable
+steady-state latency, and incremental updates that keep programmatic cost
+proportional to handover scope rather than constellation size. Where the
+constellation is too sparse to keep a ground station in view, a coverage gap
+severs the path for both protocols, delimiting the regime in which control-plane
+ordering is decisive.
 
-OrbitGraph demonstrates that graph-centric SDN routing
-can keep an emulated LEO network connected through predictable topology
-changes, the regime where orbital mechanics already give operators a global
-view and a schedule of contact events~\cite{kassing2020exploring,handley:ground-relays:2019}.
-It is not a universal replacement for distributed routing: under unplanned bulk
-failures with our container-based install path, centralized updates can lag OSPF
-(Section~\ref{sec:analysis-damage}), and reaching thousands of nodes will require
-hierarchical control and faster southbounds (Section~\ref{sec:future}).
-Within its effective range (scheduled GSL handovers and orbit-predictable graph
-snapshots), OrbitGraph shows that treating the constellation as an explicit,
-time-indexed graph and programming forwarding from a centralized controller is
-a practical path to the sub-second availability that latency-sensitive
-space--terrestrial services require.
+OrbitGraph demonstrates that graph-centric SDN routing keeps an emulated LEO
+network connected through predictable topology changes, the regime where orbital
+mechanics already give operators a global view and a contact
+schedule~\cite{kassing2020exploring,handley:ground-relays:2019}.
+It is not a universal replacement for distributed routing. Under unplanned bulk
+failures with our container-based install path, centralized updates can lag
+OSPF, and reaching thousands of nodes will require hierarchical control and
+faster southbounds.
+Within its effective range of scheduled GSL handovers and orbit-predictable
+graph snapshots, OrbitGraph shows that treating the constellation as an
+explicit, time-indexed graph and programming forwarding from a centralized
+controller is a practical path to the sub-second availability that
+latency-sensitive space--terrestrial services require.
 
-For the graph-centric computing perspective, when the
-network is a graph that changes on a known timetable, the effective
-computing model is to make that graph a first-class control object: recompute
-on snapshots, push structured deltas, and align commits with graph edits,
-rather than forcing each node to infer global state from local messages alone.
+From a graph-centric computing view, when the network is a graph that changes
+on a known timetable, the effective model makes that graph a first-class control
+object: recompute on snapshots, push structured deltas, and align commits with
+graph edits, rather than forcing each node to infer global state from local
+messages.
 OrbitGraph is a concrete instantiation of that idea for LEO routing, validated
 end-to-end in a real TCP/IP emulation environment with measurable gains in
 data-plane availability where it matters most.
