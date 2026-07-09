@@ -5,73 +5,60 @@
 
 Prior LEO routing work spans snapshot and centralized schemes, distributed
 protocols, satellite SDN management, evaluation platforms, and broader
-networking literature.
-We contrast each line with OrbitGraph's graph-centric, proactive SDN
-forwarding model (Section~\ref{sec:orbitgraph}).
+networking literature, which we contrast with OrbitGraph's graph-centric,
+proactive SDN forwarding model.
 
 \subsection{Centralized and snapshot routing}
 
-LEO constellations have been modeled as finite-state automata whose states
-correspond to recurring visibility configurations, with inter-satellite link
-assignment and multi-commodity routing optimized offline per
+LEO constellations have been modeled as finite-state automata whose states are
+recurring visibility configurations, with inter-satellite link assignment and
+multi-commodity routing optimized offline per
 state~\cite{seong:topological-design:1995}.
-That snapshot strategy avoids transient instability during topology transitions
-but relies on centralized offline computation, assumes moderate constellation
-size (12 satellites in the reported experiments), and does not address online
-failure recovery.
-OrbitGraph shares the snapshot view (each emulation second yields a graph
-$G_t$) but computes shortest paths online and pushes kernel routes through an
-SDN controller rather than storing per-state table sequences on satellites.
+That strategy avoids transient instability but relies on offline computation for
+a small constellation (12 satellites) and ignores online failure recovery.
+OrbitGraph shares the snapshot view but computes shortest paths online and
+installs kernel routes through an SDN controller rather than storing per-state
+tables on satellites.
 
-Wide-area routing in mega-constellations with and without inter-satellite
-links (ISLs) has been studied with emphasis on ground-relay paths when ISLs
-are absent and hierarchical, tile-based updates when centralized Dijkstra
-over thousands of relays would be too
-slow~\cite{handley:ground-relays:2019}.
-That line is centralized and delay-oriented like OrbitGraph, but targets
-constellation design and ground-side relay selection rather than in-container
-forwarding during live GSL handover; it does not install routes on emulated
-satellite nodes or compare against a distributed interior gateway protocol
-(IGP) baseline.
+Wide-area routing in mega-constellations with and without inter-satellite links
+(ISLs) has been studied, emphasizing ground-relay paths when ISLs are absent and
+hierarchical, tile-based updates when centralized Dijkstra over thousands of
+relays is too slow~\cite{handley:ground-relays:2019}.
+Unlike OrbitGraph, that line targets constellation design and relay selection,
+not in-container forwarding during live GSL handover, and does not compare
+against a distributed interior gateway protocol (IGP) baseline.
 
 \subsection{Distributed LEO routing protocols}
 
 DisCoRoute is a distributed on-demand algorithm for Walker-Delta
-mega-constellations that derives a closed-form minimum hop count between
-orbital identifiers and selects the next hop in constant time without global
-Dijkstra, reporting large speedups over shortest-path search at scales up to
-32\,000 satellites~\cite{gregory:satellite-routing:2022}.
-DisCoRoute optimizes hop count, assumes a fixed +Grid ISL pattern, and does
-not model link failures or data-plane convergence delay.
+mega-constellations that derives a closed-form minimum hop count between orbital
+identifiers and selects the next hop in constant time, reporting large speedups
+at up to 32\,000 satellites~\cite{gregory:satellite-routing:2022}.
+It optimizes hop count on a fixed +Grid ISL pattern and does not model link
+failures or convergence delay.
 OrbitGraph instead centralizes shortest-path computation on delay-weighted
-graphs and measures end-to-end outage during handover; the two approaches are
-complementary (distributed hop logic versus timed SDN install).
+graphs and measures end-to-end outage during handover.
 
 Orbit-predictive shortest path first (OPSPF) keeps OSPF-style hello and
-link-state update machinery but uses orbit prediction so that regular
-constellation motion generates no protocol traffic; only irregular events
-(failures) trigger updates~\cite{pam:opspf:2019}.
-Evaluated on 48 satellites, OPSPF reduces convergence time relative to vanilla
-OSPF.
-OrbitGraph removes distributed flooding entirely for the SDN mode: the
-controller recomputes $G_t$ from ephemeris and programs routes directly.
-OPSPF remains a distributed-resilience design; OrbitGraph targets zero handover
-outage via proactive install ordering rather than faster link-state update
-propagation.
+link-state machinery but uses orbit prediction so regular motion generates no
+protocol traffic, with only failures triggering updates~\cite{pam:opspf:2019}.
+Evaluated on 48 satellites, it reduces convergence time over vanilla OSPF.
+OrbitGraph removes distributed flooding entirely, recomputing $G_t$ from
+ephemeris and programming routes directly to target zero handover outage through
+proactive install ordering.
 
-Our OSPF baseline (BIRD on StarryNet~\cite{lai2023starrynet}) represents the
-reactive link-state approach analyzed in early protocol
-studies~\cite{sidhu:ospf:1993} and widely used in academic LEO
-evaluations~\cite{manzanareslopez2025comprehensive}.
-It reconverges only after full topology mutation, which Section~\ref{sec:analysis}
-shows can black-hole traffic for multiple seconds at GSL handover, the behavior
-OrbitGraph is designed to eliminate.
+Our OSPF baseline, BIRD on StarryNet~\cite{lai2023starrynet}, represents the
+reactive link-state approach from early protocol studies~\cite{sidhu:ospf:1993}
+and widely used in LEO evaluations~\cite{manzanareslopez2025comprehensive}.
+It reconverges only after full topology mutation, which
+Section~\ref{sec:analysis} shows can black-hole traffic for several seconds at
+GSL handover, the behavior OrbitGraph eliminates.
 
-Terrestrial ad hoc routing (ad hoc on-demand distance vector
-(AODV)~\cite{perkins:aodv:1999}, greedy perimeter stateless routing
-(GPSR)~\cite{karp:gpsr:2000}) targets unpredictable mobility without orbital
-models; ns-3-leo reports that such mobile ad hoc network (MANET) protocols
-perform poorly in highly dynamic satellite scenarios~\cite{ns3leo2022}.
+Terrestrial ad hoc routing, such as ad hoc on-demand distance vector
+(AODV)~\cite{perkins:aodv:1999} and greedy perimeter stateless routing
+(GPSR)~\cite{karp:gpsr:2000}, targets unpredictable mobility without orbital
+models, and ns-3-leo reports that such mobile ad hoc network (MANET) protocols
+perform poorly in dynamic satellite scenarios~\cite{ns3leo2022}.
 OrbitGraph exploits the opposite assumption: topology is predictable from
 SGP4-based delay matrices, so a centralized graph controller is feasible.
 
@@ -80,49 +67,44 @@ SGP4-based delay matrices, so a centralized graph controller is feasible.
 The SDN paradigm separates control and data planes and enables programmatic
 forwarding through interfaces such as OpenFlow~\cite{10.1145/1355734.1355746}.
 Representing an SDN domain as a graph gives controllers a unified structure for
-topology-aware management and shortest-path
-algorithms~\cite{7014202}; OrbitGraph applies that graph-centric control model
-to time-varying LEO snapshots rather than terrestrial OpenFlow switches.
+topology-aware management and shortest-path algorithms~\cite{7014202}, which
+OrbitGraph applies to time-varying LEO snapshots rather than terrestrial
+OpenFlow switches.
 
-Satellite-specific SDN research has focused on controller placement,
-not data-plane route computation.
-Dynamic controller placement on an Iridium-class 66-satellite constellation has
-been formulated as an integer linear program that minimizes average flow setup
-time under time-varying traffic~\cite{papa:sdn-cpp:2018}.
-Static placement with dynamic assignment keeps controllers on fixed satellites
-while switch-to-controller bindings adapt to topology snapshots, reducing
-migration cost on Iridium and Celestri
+Satellite-specific SDN research has focused on controller placement, not
+data-plane route computation.
+Dynamic placement on an Iridium-class 66-satellite constellation has been cast
+as an integer linear program minimizing average flow setup
+time~\cite{papa:sdn-cpp:2018}, while static placement adapts
+switch-to-controller bindings to topology snapshots on Iridium and Celestri
 models~\cite{guo:spda:2022}.
-Both lines optimize where control logic runs and which nodes attach
-to which controller; they treat forwarding as a shortest-path black box.
-OrbitGraph addresses the complementary problem of what routes to install
-and when relative to link lifetime, and evaluates data-plane availability
-during handover, not switch-controller latency alone.
+Both optimize control placement and treat forwarding as a black box, whereas
+OrbitGraph addresses what routes to install and when relative to link lifetime,
+evaluating data-plane availability during handover rather than switch-controller
+latency.
 
 \subsection{Simulation and emulation platforms}
 
-Several tools support LEO routing research at different fidelity levels.
-The ns-3-leo module~\cite{ns3leo2022} extends discrete-event simulation with
-orbital mobility, ISLs, and MANET routing protocols, highlighting limitations
-of terrestrial protocols in space.
-A dedicated LEO network simulator provides configurable +Grid and sparse ISL
-topologies and 3D
-visualization~\cite{kempton:network-simulator:2021}; the underlying SILLEO-SCNS
-tool~\cite{kempton2020silleo,online:silleo:2025} focuses on topology generation
-rather than packet-level stacks.
-Simplified satellite scenarios in OMNeT++~5 support rapid
+The ns-3-leo module~\cite{ns3leo2022} adds orbital mobility, ISLs, and MANET
+routing to discrete-event simulation, highlighting limitations of terrestrial
+protocols in space.
+A dedicated LEO simulator provides configurable +Grid and sparse ISL topologies
+with 3D visualization~\cite{kempton:network-simulator:2021}, and the underlying
+SILLEO-SCNS tool~\cite{kempton2020silleo,online:silleo:2025} focuses on topology
+generation rather than packet-level stacks.
+Simplified OMNeT++~5 scenarios support rapid
 prototyping~\cite{dewangan:simple-omnet:2017}.
-These platforms either lack real protocol stacks (SILLEO-SCNS) or use
-distributed routing without centralized proactive install (ns-3-leo with AODV).
+These platforms either lack real protocol stacks or use distributed routing
+without centralized proactive install.
 
 Packet-level ns-3 frameworks are surveyed
 comprehensively~\cite{manzanareslopez2025comprehensive}.
-Hypatia~\cite{kassing2020exploring} precomputes orbital state and runs ns-3
-with static Floyd--Warshall routing; StarPerf~\cite{lai2020starperf} profiles
-area-to-area performance statistically; LEOPath~\cite{leopath2024} targets
-routing-algorithm comparison without end-to-end kernel forwarding.
+Hypatia~\cite{kassing2020exploring} runs ns-3 with static Floyd--Warshall
+routing, StarPerf~\cite{lai2020starperf} profiles area-to-area performance, and
+LEOPath~\cite{leopath2024} targets routing-algorithm comparison without
+end-to-end kernel forwarding.
 StarryNet~\cite{lai2023starrynet} emulates real TCP/IP and OSPF in containers
-and is our evaluation harness; OrbitGraph extends it with a centralized
+and is our evaluation harness, which OrbitGraph extends with a centralized
 controller, incremental kernel route install, and proactive handover
 (Section~\ref{sec:simulation}).
 
@@ -130,37 +112,27 @@ controller, incremental kernel route install, and proactive handover
 
 Growing interest in large LEO and swarm systems motivates global, low-latency
 connectivity~\cite{smallsats2020,asri2024swarm,farrag:swarm-survey:2021}.
-Swarm intelligence networking frameworks~\cite{chen2022swarm} and formation
-control studies~\cite{fangchen2022pdg} address coordination at the mission
-layer rather than IP handover semantics; they do not replace routing protocols
-but illustrate the scale and dynamics OrbitGraph targets at the network layer.
-
-Machine-learning routing for LEO networks is surveyed with emphasis on model
-design, training, and deployment
-challenges~\cite{zhu:ml-routing-survey:2025}.
-That literature pursues learned policies; OrbitGraph uses explicit graph
-snapshots and Dijkstra shortest paths with deterministic SDN install ordering,
-which yields reproducible handover behavior suitable for controlled comparison
-with OSPF.
-
-An earlier experimentation environment for distributed routing analysis in LEO
+Swarm intelligence frameworks~\cite{chen2022swarm} and formation control
+studies~\cite{fangchen2022pdg} address mission-layer coordination, not IP
+handover, and machine-learning routing is surveyed with emphasis on model design
+and deployment~\cite{zhu:ml-routing-survey:2025}.
+An earlier environment for distributed routing analysis in LEO
 swarms~\cite{online:silleo-routing:2025} compared conventional protocols without
 a centralized proactive strategy.
-The present work advances that line by implementing OrbitGraph, graph-centric
-SDN with incremental, make-before-break updates, and quantifying data-plane
-outage against the same class of emulated constellations.
+OrbitGraph instead uses explicit graph snapshots and Dijkstra shortest paths
+with deterministic SDN install ordering, quantifying data-plane outage on the
+same class of emulated constellations for reproducible comparison with OSPF.
 
 \subsection{Positioning of OrbitGraph}
 
 Table~\ref{tab:related-positioning} summarizes how OrbitGraph relates to the
 closest prior lines.
 Prior snapshot and centralized schemes optimize offline tables or relay
-placement; distributed protocols optimize hop count or OSPF convergence;
+placement, distributed protocols optimize hop count or OSPF convergence, and
 satellite SDN papers optimize controller placement.
-OrbitGraph combines online graph snapshots, centralized delay-weighted
-shortest paths, incremental dataplane deltas, and proactive GSL handover in a
-single emulated system with measured end-to-end outage, a combination not
-present in the works above.
+OrbitGraph combines online graph snapshots, centralized delay-weighted shortest
+paths, incremental dataplane deltas, and proactive GSL handover in one emulated
+system with measured end-to-end outage, a combination absent from these works.
 
 \begin{table}[!h]
   \centering
