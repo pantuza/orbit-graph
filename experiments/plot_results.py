@@ -623,48 +623,43 @@ def plot_handover_classified(
     ho_nodes = sorted({n for (n, _m, et) in agg if et == "handover"})
     gap_nodes = sorted({n for (n, _m, et) in agg if et == "coverage_gap"})
 
-    have_gap = bool(gap_nodes)
-    ncols = 2 if have_gap else 1
-    # Give the coverage-gap panel enough relative width that its (wrapped) title
-    # clears the axis and its y-label, even when it holds a single node group.
-    widths = ([len(ho_nodes), max(3, len(gap_nodes) + 2)] if have_gap else [1])
-    fig_w = (1.25 * sum(widths) + 1.6) if have_gap else (4.2 + 1.1 * len(ho_nodes))
-    fig, axes = plt.subplots(
-        1, ncols, figsize=(fig_w, 4.6),
-        gridspec_kw={"width_ratios": widths}, squeeze=False,
-    )
+    def _render_class(nodes, event_type, title, stem, fig_w, legend_loc):
+        """One standalone single-column figure for a single event class."""
+        fig, ax = plt.subplots(figsize=(fig_w, 4.2))
+        if not _plot_class_panel(ax, agg, nodes, event_type, title=title):
+            plt.close(fig)
+            print(f"  skip {stem}: no plottable values")
+            return []
+        ax.set_ylabel("Worst outage per run (s)")
+        handles = [
+            plt.Line2D([0], [0], marker="o", linestyle="none",
+                       color=MODE_COLORS["ospf"], label="OSPF"),
+            plt.Line2D([0], [0], marker="o", linestyle="none",
+                       color=MODE_COLORS["sdn"], label="OrbitGraph (SDN)"),
+        ]
+        ax.legend(handles=handles, loc=legend_loc)
+        fig.tight_layout()
+        return _save_figure(fig, out_dir, stem, dpi)
 
-    any_data = _plot_class_panel(
-        axes[0][0], agg, ho_nodes, "handover",
-        title="Coverage-preserving handovers",
-    )
-    axes[0][0].set_ylabel("Worst outage per run (s)")
+    written: List[str] = []
+    written.extend(_render_class(
+        ho_nodes, "handover", "Coverage-preserving handovers",
+        "handover_coverage_preserving", 4.2 + 1.1 * len(ho_nodes),
+        "upper left",
+    ))
+    if gap_nodes:
+        # Data clusters at the top of a 0-baseline axis, so the legend sits in
+        # the empty lower area rather than over the title/violins.
+        written.extend(_render_class(
+            gap_nodes, "coverage_gap",
+            "Coverage-gap events\n(no satellite in view)",
+            "handover_coverage_gap", 4.0, "center",
+        ))
 
-    if have_gap:
-        any_data |= _plot_class_panel(
-            axes[0][1], agg, gap_nodes, "coverage_gap",
-            title="Coverage-gap events\n(no satellite in view)",
-        )
-        axes[0][1].set_ylabel("Worst outage per run (s)")
-
-    if not any_data:
-        plt.close(fig)
+    if not written:
         print("  skip handover_classified: no plottable values")
         return None
-
-    handles = [
-        plt.Line2D([0], [0], marker="o", linestyle="none",
-                   color=MODE_COLORS["ospf"], label="OSPF"),
-        plt.Line2D([0], [0], marker="o", linestyle="none",
-                   color=MODE_COLORS["sdn"], label="OrbitGraph (SDN)"),
-    ]
-    axes[0][0].legend(handles=handles, loc="upper left")
-    fig.suptitle(
-        "Handover outage by event class",
-        y=1.02,
-    )
-    fig.tight_layout(w_pad=2.5)
-    return _save_figure(fig, out_dir, "handover_classified", dpi)
+    return written
 
 
 DAMAGE_RECOVERY = "damage_recovery"

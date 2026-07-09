@@ -27,23 +27,19 @@ leaves a ground station with no satellite in view, physically severing the
 ground-to-ground path; there is no replacement link to install, so the
 classification depends only on orbital geometry, not on the routing protocol.
 
-\begin{figure*}[!t]
+\begin{figure}[!h]
   \centering
-  \includegraphics[width=\linewidth]{figures/handover_classified.png}
-  \caption{Data-plane outage at GSL handover, classified by physical event type,
-    reported as the worst outage per run over ten repetitions, OSPF (red) against
-    OrbitGraph (blue).
-    Left: coverage-preserving handovers, where a replacement satellite is in
-    view; OrbitGraph holds 0\,s while OSPF reconverges for several seconds.
-    Right: coverage-gap events, where a ground station has no satellite in view;
-    both protocols black-hole because the path is physically severed.
+  \includegraphics[width=\linewidth]{figures/handover_coverage_preserving.png}
+  \caption{Data-plane outage at coverage-preserving GSL handovers, where a
+    replacement satellite is in view, reported as the worst outage per run over
+    ten repetitions, OSPF (red) against OrbitGraph (blue).
+    OrbitGraph holds 0\,s while OSPF reconverges for several seconds.
     Violin is the estimated density, the box marks median and interquartile
-    range, and each dot is one repetition. The two panels use different vertical
-    scales.}
-  \label{fig:outage-handover}
-\end{figure*}
+    range, and each dot is one repetition.}
+  \label{fig:outage-preserving}
+\end{figure}
 
-Figure~\ref{fig:outage-handover} is the central result of this work.
+Figure~\ref{fig:outage-preserving} is the central result of this work.
 On coverage-preserving handovers, OSPF data-plane outage ranges from
 ${\sim}0.4$\,s on the $9{\times}9$ grid (83 nodes) to ${\sim}15$\,s on the
 $7{\times}7$ and $10{\times}10$ grids (51 and 102 nodes), with intermediate
@@ -70,7 +66,20 @@ commit forwarding for the new graph while both contacts briefly coexist,
 something distributed OSPF cannot do without protocol
 extensions~\cite{pam:opspf:2019,gregory:satellite-routing:2022}.
 
-The right panel of Figure~\ref{fig:outage-handover} reports the boundary of that
+\begin{figure}[!h]
+  \centering
+  \includegraphics[width=0.7\linewidth]{figures/handover_coverage_gap.png}
+  \caption{Data-plane outage at coverage-gap events, where a ground station has
+    no satellite in view, reported as the worst outage per run over ten
+    repetitions, OSPF (red) against OrbitGraph (blue).
+    Both protocols black-hole because the ground-to-ground path is physically
+    severed.
+    Violin is the estimated density, the box marks median and interquartile
+    range, and each dot is one repetition.}
+  \label{fig:outage-gap}
+\end{figure}
+
+Figure~\ref{fig:outage-gap} reports the boundary of that
 advantage. On the $8{\times}8$ grid (66 nodes), a probed ground station falls
 into a coverage gap during the handover window: with only 64 satellites the
 constellation is too sparse to keep a satellite in view over that location, so
@@ -80,6 +89,12 @@ ${\sim}162$\,s for OrbitGraph), because make-before-break requires a replacement
 link to pre-install and a coverage gap offers none. This is a property of the
 constellation's physical coverage, not of the control plane, and it disappears
 in the denser topologies that keep continuous ground visibility.
+
+Figure~\ref{fig:outage-ecdf} pools every coverage-preserving handover repetition
+into a single empirical cumulative distribution function.
+The two curves separate completely: OrbitGraph reaches unit probability at 0\,s,
+whereas OSPF spreads across the full range, with distinct clusters near
+${\sim}5$\,s and ${\sim}15$\,s that reflect the different handover geometries.
 
 \begin{figure}[!h]
   \centering
@@ -93,13 +108,6 @@ in the denser topologies that keep continuous ground visibility.
     OSPF (red) spreads across seconds, with a tail extending to ${\sim}15$\,s.}
   \label{fig:outage-ecdf}
 \end{figure}
-
-Figure~\ref{fig:outage-ecdf} pools every coverage-preserving handover repetition
-into a single empirical cumulative distribution function.
-The two curves separate completely: OrbitGraph reaches unit probability at 0\,s,
-whereas OSPF spreads across the full range, with distinct clusters near
-${\sim}5$\,s and ${\sim}15$\,s that reflect the different handover geometries.
-
 
 \subsection{Reachability and latency across handover phases}
 \label{sec:analysis-dataplane}
@@ -122,11 +130,11 @@ ${\sim}5$\,s and ${\sim}15$\,s that reflect the different handover geometries.
 \end{figure*}
 
 Figure~\ref{fig:phase-metrics} complements
-Figure~\ref{fig:outage-handover} with scheduled probes at the handover tick,
+Figure~\ref{fig:outage-preserving} with scheduled probes at the handover tick,
 two seconds later, and near emulation end.
 These fixed-offset probes measure forwarding on coverage-preserving handovers;
 they do not sample the $8{\times}8$ coverage-gap window, whose sustained outage
-is captured only by the continuous probe of Figure~\ref{fig:outage-handover}.
+is captured only by the continuous probe of Figure~\ref{fig:outage-gap}.
 
 OrbitGraph achieves 0\% loss in the handover and post-handover phases on
 every grid size and in every repetition.
@@ -150,7 +158,7 @@ ${\sim}236$\,ms on $10{\times}10$), confirming that OrbitGraph does not
 degrade steady-state path quality; it changes when the new path becomes
 usable, not which shortest path is chosen.
 
-Together, Figures~\ref{fig:outage-handover} and~\ref{fig:phase-metrics}
+Together, Figures~\ref{fig:outage-preserving} and~\ref{fig:phase-metrics}
 show that SDN's advantage is not raw steady-state performance but
 continuity through predictable topology mutations, the defining challenge
 of LEO graph dynamics~\cite{kassing2020exploring,handley:ground-relays:2019}.
@@ -181,14 +189,14 @@ than OSPF's ${\sim}200$\,ms route observation cost.
 This asymmetry is intentional to report honestly.
 OSPF's bar measures how long it takes to read routing state after an
 event; it does not include the multi-second reconvergence that
-Figure~\ref{fig:outage-handover} shows in the data plane.
+Figure~\ref{fig:outage-preserving} shows in the data plane.
 OrbitGraph's install bar reflects our container southbound harness;
 a production SDN plane (gRPC, NETCONF, or on-board agents receiving compressed
 deltas) would shrink install time while preserving the same FIB semantics.
 
 Crucially, heavy install does not imply heavy data-plane outage when
 updates are ordered proactively: the continuous probe in
-Figure~\ref{fig:outage-handover} shows 0\,s black hole even while install runs,
+Figure~\ref{fig:outage-preserving} shows 0\,s black hole even while install runs,
 because forwarding entries for the new path are already in place before the old
 GSL disappears.
 
