@@ -1,1 +1,1 @@
-# StarryNet routing experiments (OSPF vs SDN batches).
+# OrbitGraph routing experiments (OSPF vs SDN batches).
