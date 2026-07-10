@@ -41,7 +41,7 @@ that changed since the previous snapshot.
 At a handover, the controller installs the post-handover FIB \emph{before} the
 old GSL is torn down, turning orbital predictability into make-before-break
 forwarding at the topology level.
-We implement OrbitGraph on the StarryNet emulator~\cite{lai2023starrynet}, which
+We implement OrbitGraph~\cite{online:orbitgraph:2025} on the StarryNet emulator~\cite{lai2023starrynet}, which
 runs real TCP/IP stacks and an OSPF control plane in containers, and evaluate it
 against that distributed baseline on Walker constellations from 27 to 102 nodes
 using a continuous outage probe aligned to routing events.
