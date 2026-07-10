@@ -1,8 +1,7 @@
 #!/usr/bin/python
 # -*- coding: UTF-8 -*-
 """
-StarryNet: empowering researchers to evaluate futuristic integrated space and terrestrial networks.
-author: Zeqi Lai (zeqilai@tsinghua.edu.cn) and Yangtao Deng (dengyt21@mails.tsinghua.edu.cn)
+OrbitGraph example (OSPF mode), running on the StarryNet emulator.
 """
 
 from starrynet.sn_observer import *
@@ -20,7 +19,7 @@ if __name__ == "__main__":
     configuration_file_path = "./config.json"
     hello_interval = 1  # hello_interval(s) in OSPF. 1-200 are supported.
 
-    print('Start StarryNet.')
+    print('Start OrbitGraph.')
     sn = StarryNet(configuration_file_path, GS_lat_long, hello_interval, AS)
     sn.create_nodes()
     sn.create_links()
