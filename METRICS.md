@@ -1,6 +1,6 @@
 # Metrics we analyze (OSPF vs SDN)
 
-This file defines the **paper-facing** metrics we will report from StarryNet runs, and how to interpret them fairly.
+This file defines the **paper-facing** metrics we will report from OrbitGraph runs, and how to interpret them fairly.
 
 ## Primary outcome metrics (data plane)
 
