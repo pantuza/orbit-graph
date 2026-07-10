@@ -1,8 +1,8 @@
-# Running StarryNet Locally on macOS
+# Running OrbitGraph Locally on macOS
 
-StarryNet simulates satellite network constellations using Docker containers and Linux
-traffic control (`tc`). This guide explains how to run it on macOS without a remote Linux
-server.
+OrbitGraph simulates satellite network constellations using Docker containers and Linux
+traffic control (`tc`), building on the StarryNet emulator. This guide explains how to run
+it on macOS without a remote Linux server.
 
 ## How it works
 
@@ -23,9 +23,9 @@ primitives work transparently.
 
 ```bash
 # 1. Create and activate the project virtualenv
-pyenv virtualenv 3.11.4 starrynet
-cd /path/to/StarryNet
-pyenv local starrynet          # writes .python-version, auto-activates on cd
+pyenv virtualenv 3.11.4 orbit-graph
+cd /path/to/orbit-graph
+pyenv local orbit-graph        # writes .python-version, auto-activates on cd
 
 # 2. Install dependencies into the virtualenv
 python -m pip install -r tools/requirements.txt
