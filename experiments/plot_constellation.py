@@ -339,7 +339,7 @@ def render_constellation(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Plot Earth + Walker LEO constellation (StarryNet parameters)")
+        description="Plot Earth + Walker LEO constellation (OrbitGraph parameters)")
     parser.add_argument("--orbits", type=int, default=10)
     parser.add_argument("--sats", type=int, default=10,
                         help="Satellites per orbital plane")
