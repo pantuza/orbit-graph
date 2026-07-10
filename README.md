@@ -1,15 +1,21 @@
-# StarryNet
+# OrbitGraph
 
-StarryNet for the emulation of satellite Internet constellations.
+OrbitGraph: SDN-based routing for Low Earth Orbit (LEO) satellite constellations.
 
-## What is StarryNet?
+> **Fork notice.** OrbitGraph is a fork of [StarryNet](https://github.com/SpaceNetLab/StarryNet)
+> (Lai et al., NSDI 2023) modified to implement SDN-based routing for LEO constellations. It keeps
+> StarryNet's container-based emulation core and adds a centralized controller that computes
+> graph-based shortest paths and installs proactive, make-before-break forwarding at handover. The
+> Python API library retains the upstream package name `starrynet`.
 
-StarryNet helps you to emulate your customized constellation and ground stations with run-time routing for a given duration. With StarryNet, you can test availability/bandwidth/loss within nodes, check routing states of a node and even damage certain links.
+## What is OrbitGraph?
+
+OrbitGraph emulates a customized constellation and ground stations with run-time routing for a given duration, building on StarryNet's emulation. On top of that emulation it runs a centralized SDN controller that programs kernel routes from time-varying graph snapshots, so you can compare distributed OSPF against proactive, graph-centric SDN routing and measure availability/bandwidth/loss within nodes, inspect routing state, and even damage certain links.
 
 ## What are the components?
 
 1. A configuration file (`config.json`).
-2. An API Library (`starrynet`).
+2. An API Library (`starrynet`, the retained upstream emulator package).
 3. An example leveraging APIs to run your trials (`example.py`).
 4. A `setup.py` and `./bin/sn`.
 
@@ -135,7 +141,7 @@ Finish *remote_machine_IP, remote_machine_username and remote_machine_password* 
 
 > sn
 
-In the same path of `config.json`, run `sn` in shell, you will see the starrynet CLI. `sn` automatically starts a 5*5(satellites)+2(GS) scale network as described above if you only finish *remote_machine_IP, remote_machine_username and remote_machine_password* in config.json without changing other fields. See an example below.
+In the same path of `config.json`, run `sn` in shell, you will see the OrbitGraph CLI (its interactive prompt is `starrynet>`, inherited from the emulator core). `sn` automatically starts a 5*5(satellites)+2(GS) scale network as described above if you only finish *remote_machine_IP, remote_machine_username and remote_machine_password* in config.json without changing other fields. See an example below.
 
 > sn -h
 
@@ -207,4 +213,4 @@ In the same path of `config.json`, run `sn` in shell, you will see the starrynet
 
 > starrynet> exit
 
-*After running the commands above, you will find a working directory at the Starrynet/starrynet directory, containing the output files.*
+*After running the commands above, you will find a working directory at the orbit-graph/starrynet directory, containing the output files.*
