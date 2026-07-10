@@ -1,4 +1,4 @@
-# StarryNet — local emulation and OSPF vs SDN comparison
+# OrbitGraph — local emulation and OSPF vs SDN comparison
 #
 # Run `make` or `make help` to list targets. Help text lives in ## comments on
 # each target rule line.
@@ -15,7 +15,7 @@ DOCKER_IMAGE  = lwsen/starlab_node:1.0
 	paper-5x5 paper-6x6 paper-7x7 paper-8x8 paper-9x9 paper-10x10
 
 help: ## Show this help
-	@echo "StarryNet Makefile targets:"
+	@echo "OrbitGraph Makefile targets:"
 	@echo ""
 	@grep -E '^[a-zA-Z0-9_.-]+:.*## ' $(MAKEFILE_LIST) | \
 		awk 'BEGIN {FS = ":.*## "}; {printf "  %-18s %s\n", $$1, $$2}' | sort
@@ -31,7 +31,7 @@ install-deps: ## pip install requirements + package (editable)
 	$(PYTHON) -m pip install -r tools/requirements.txt
 	$(PYTHON) -m pip install -e .
 
-docker-pull: ## Pull StarryNet container image lwsen/starlab_node:1.0 (~300 MB)
+docker-pull: ## Pull OrbitGraph container image lwsen/starlab_node:1.0 (~300 MB)
 	docker pull $(DOCKER_IMAGE)
 
 test: ## Run SDN routing unit tests
