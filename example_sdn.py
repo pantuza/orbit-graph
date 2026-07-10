@@ -1,7 +1,7 @@
 #!/usr/bin/python
 # -*- coding: UTF-8 -*-
 """
-StarryNet example using centralized SDN routing (control plane separated from data plane).
+OrbitGraph example using centralized SDN routing (control plane separated from data plane).
 
 Set config.json "Intra-AS routing" to "SDN", or use config_sdn.json as below.
 Compare against example.py (OSPF) with identical traffic/failure scripts.
@@ -17,7 +17,7 @@ if __name__ == "__main__":
     configuration_file_path = "./config_sdn_basic.json"
     hello_interval = 1
 
-    print("Start StarryNet (SDN routing mode, basic profile).")
+    print("Start OrbitGraph (SDN routing mode, basic profile).")
     sn = StarryNet(configuration_file_path, GS_lat_long, hello_interval, AS)
     sn.create_nodes()
     sn.create_links()
