@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 """
-Starrynet runner
-author: Yangtao Deng (dengyt21@mails.tsinghua.edu.cn)
+OrbitGraph runner (fork of StarryNet)
 
 To see options:
   sudo sn -h
@@ -23,8 +22,8 @@ import starrynet.cli
 from starrynet.log import lg, LEVELS, info, debug, warn, error, output
 
 
-class StarrynetRunner(object):
-    "Build, setup, and run Starrynet."
+class OrbitGraphRunner(object):
+    "Build, setup, and run OrbitGraph."
 
     def __init__(self):
         "Init."
@@ -42,9 +41,9 @@ class StarrynetRunner(object):
         """Parse command-line args and return options object.
            returns: opts parse options dict"""
 
-        desc = ("The %prog utility creates Starrynet network from the\n"
+        desc = ("The %prog utility creates an OrbitGraph network from the\n"
                 "command line. It can create parametrized topologies,\n"
-                "invoke the Starrynet CLI, and run tests.")
+                "invoke the OrbitGraph CLI, and run tests.")
 
         usage = ('%prog [options]\n'
                  '(type %prog -h for details)')
@@ -90,7 +89,7 @@ class StarrynetRunner(object):
             exit()
 
     def begin(self):
-        "Create and run starrynet."
+        "Create and run OrbitGraph."
 
         CLI = starrynet.cli.CLI
 
@@ -120,7 +119,7 @@ class StarrynetRunner(object):
 
 if __name__ == "__main__":
     try:
-        StarrynetRunner()
+        OrbitGraphRunner()
     except KeyboardInterrupt:
         info("\n\nKeyboard Interrupt. Shutting down and cleaning up...\n\n")
         cleanup()
