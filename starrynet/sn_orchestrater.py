@@ -467,19 +467,27 @@ def sn_del_network(network_name):
 
 def sn_stop_emulation():
     os.system(
-        "docker rm -f $(docker ps -aq --filter name=ovs_container) 2>/dev/null; true"
+        "docker rm -f $(docker ps -aq --filter name=ovs_container) "
+        "2>/dev/null; true"
     )
-    with os.popen("docker network ls") as f:
+
+    with os.popen("docker network ls --format '{{.Name}}'") as f:
         all_br_info = f.readlines()
         del_threads = []
+
         for line in all_br_info:
-            if "La" in line or "Le" in line or "GS" in line:
-                network_name = line.split()[1]
-                del_thread = threading.Thread(target=sn_del_network,
-                                              args=(network_name, ))
+            network_name = line.strip()
+
+            if network_name.startswith(("La_", "Le_", "GSL_", "GS_")):
+                del_thread = threading.Thread(
+                    target=sn_del_network,
+                    args=(network_name,)
+                )
                 del_threads.append(del_thread)
+
         for del_thread in del_threads:
             del_thread.start()
+
         for del_thread in del_threads:
             del_thread.join()
 
