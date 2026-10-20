@@ -1,0 +1,13 @@
+{
+    "workers": [
+        {
+            "name": "orbital-1",
+            "docker_context": "orbital-worker-1",
+            "data_ip": "100.79.254.80"
+        }
+    ],
+    "placement": {
+        "strategy": "single_worker",
+        "default_worker": "orbital-1"
+    }
+}

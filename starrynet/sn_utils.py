@@ -9,6 +9,7 @@ from time import sleep
 import time
 import numpy
 import random
+import ipaddress
 """
 Starrynet utils that are used in sn_synchronizer
 author: Yangtao Deng (dengyt21@mails.tsinghua.edu.cn) and Zeqi Lai (zeqilai@tsinghua.edu.cn)
@@ -472,12 +473,20 @@ def sn_wait_for_containers(
 
 
 def sn_delete_remote_network_bridge(remote_ssh):
-    all_br_info = sn_remote_cmd(remote_ssh, "docker network ls")
+    all_br_info = sn_remote_cmd(
+        remote_ssh,
+        "docker network ls --format '{{.Name}}'"
+    )
+
     for line in all_br_info:
-        if "La" in line or "Le" in line or "GS" in line:
-            network_name = line.split()[1]
-            print('docker network rm ' + network_name)
-            sn_remote_cmd(remote_ssh, 'docker network rm ' + network_name)
+        network_name = line.strip()
+
+        if network_name.startswith(("La_", "Le_", "GSL_", "GS_")):
+            print("docker network rm " + network_name)
+            sn_remote_cmd(
+                remote_ssh,
+                "docker network rm " + network_name
+            )
 
 
 def sn_reset_docker_env(remote_ssh, docker_service_name, node_size):
@@ -522,7 +531,7 @@ def sn_reset_docker_env(remote_ssh, docker_service_name, node_size):
             raise
     else:
         print(sn_remote_cmd(remote_ssh, "docker service rm " + docker_service_name))
-        print(sn_remote_cmd(remote_ssh, "docker rm -f $(docker ps -a -q)"))
+        print(sn_remote_cmd(remote_ssh, _OVS_CONTAINER_RM_CMD))
         print("Remove legacy emulated ISLs.")
         sn_delete_remote_network_bridge(remote_ssh)
         print("Creating new containers...")
@@ -1121,88 +1130,343 @@ def sn_establish_new_GSL(container_id_list, matrix, constellation_size, bw,
                          loss, sat_index, GS_index, remote_ssh):
     i = sat_index
     j = GS_index
-    # IP address  (there is a link between i and j)
+
     delay = str(matrix[i - 1][j - 1])
     address_16_23 = (j - constellation_size) & 0xff
     address_8_15 = i & 0xff
+
     GSL_name = "GSL_" + str(i) + "-" + str(j)
-    # Create internal network in docker.
-    sn_remote_cmd(
-        remote_ssh, 'docker network create ' + GSL_name + " --subnet 9." +
-        str(address_16_23) + "." + str(address_8_15) + ".0/24")
-    print('[Create GSL:]' + 'docker network create ' + GSL_name +
-          " --subnet 9." + str(address_16_23) + "." + str(address_8_15) +
-          ".0/24")
-    sn_remote_cmd(
-        remote_ssh, 'docker network connect ' + GSL_name + " " +
-        str(container_id_list[i - 1]) + " --ip 9." + str(address_16_23) + "." +
-        str(address_8_15) + ".50")
-    ifconfig_output = sn_remote_cmd(
-        remote_ssh, "docker exec -i " + str(container_id_list[i - 1]) +
-        " ip addr | grep -B 2 9." + str(address_16_23) + "." +
-        str(address_8_15) +
-        ".50 | head -n 1 | awk -F: '{ print $2 }' | tr -d [:blank:]")
-    target_interface = str(ifconfig_output[0]).split("@")[0]
-    sn_remote_cmd(
-        remote_ssh, "docker exec -d " + str(container_id_list[i - 1]) +
-        " ip link set dev " + target_interface + " down")
-    sn_remote_cmd(
-        remote_ssh, "docker exec -d " + str(container_id_list[i - 1]) +
-        " ip link set dev " + target_interface + " name " + "B" +
-        str(i - 1 + 1) + "-eth" + str(j))
-    sn_remote_cmd(
-        remote_ssh, "docker exec -d " + str(container_id_list[i - 1]) +
-        " ip link set dev B" + str(i - 1 + 1) + "-eth" + str(j) + " up")
-    sn_remote_cmd(
-        remote_ssh, "docker exec -d " + str(container_id_list[i - 1]) +
-        " tc qdisc add dev B" + str(i - 1 + 1) + "-eth" + str(j) +
-        " root netem delay " + str(delay) + "ms")
-    sn_remote_cmd(
-        remote_ssh, "docker exec -d " + str(container_id_list[i - 1]) +
-        " tc qdisc add dev B" + str(i - 1 + 1) + "-eth" + str(j) +
-        " root netem loss " + str(loss) + "%")
-    sn_remote_cmd(
-        remote_ssh, "docker exec -d " + str(container_id_list[i - 1]) +
-        " tc qdisc add dev B" + str(i - 1 + 1) + "-eth" + str(j) +
-        " root netem rate " + str(bw) + "Gbps")
-    print('[Add current node:]' + 'docker network connect ' + GSL_name + " " +
-          str(container_id_list[i - 1]) + " --ip 9." + str(address_16_23) +
-          "." + str(address_8_15) + ".50")
-    sn_remote_cmd(
-        remote_ssh, 'docker network connect ' + GSL_name + " " +
-        str(container_id_list[j - 1]) + " --ip 9." + str(address_16_23) + "." +
-        str(address_8_15) + ".60")
-    ifconfig_output = sn_remote_cmd(
-        remote_ssh, "docker exec -i " + str(container_id_list[j - 1]) +
-        " ip addr | grep -B 2 9." + str(address_16_23) + "." +
-        str(address_8_15) +
-        ".60 | head -n 1 | awk -F: '{ print $2 }' | tr -d [:blank:]")
-    target_interface = str(ifconfig_output[0]).split("@")[0]
-    sn_remote_cmd(
-        remote_ssh, "docker exec -d " + str(container_id_list[j - 1]) +
-        " ip link set dev " + target_interface + " down")
-    sn_remote_cmd(
-        remote_ssh, "docker exec -d " + str(container_id_list[j - 1]) +
-        " ip link set dev " + target_interface + " name " + "B" + str(j) +
-        "-eth" + str(i - 1 + 1))
-    sn_remote_cmd(
-        remote_ssh, "docker exec -d " + str(container_id_list[j - 1]) +
-        " ip link set dev B" + str(j) + "-eth" + str(i - 1 + 1) + " up")
-    sn_remote_cmd(
-        remote_ssh, "docker exec -d " + str(container_id_list[j - 1]) +
-        " tc qdisc add dev B" + str(j) + "-eth" + str(i - 1 + 1) +
-        " root netem delay " + str(delay) + "ms")
-    sn_remote_cmd(
-        remote_ssh, "docker exec -d " + str(container_id_list[j - 1]) +
-        " tc qdisc add dev B" + str(j) + "-eth" + str(i - 1 + 1) +
-        " root netem loss " + str(loss) + "%")
-    sn_remote_cmd(
-        remote_ssh, "docker exec -d " + str(container_id_list[j - 1]) +
-        " tc qdisc add dev B" + str(j) + "-eth" + str(i - 1 + 1) +
-        " root netem rate " + str(bw) + "Gbps")
-    print('[Add right node:]' + 'docker network connect ' + GSL_name + " " +
-          str(container_id_list[j - 1]) + " --ip 9." + str(address_16_23) +
-          "." + str(address_8_15) + ".60")
+
+    subnet = (
+        "9." + str(address_16_23) + "." +
+        str(address_8_15) + ".0/24"
+    )
+
+    sat_ip = (
+        "9." + str(address_16_23) + "." +
+        str(address_8_15) + ".50"
+    )
+
+    gs_ip = (
+        "9." + str(address_16_23) + "." +
+        str(address_8_15) + ".60"
+    )
+
+    sat_container = str(container_id_list[i - 1])
+    gs_container = str(container_id_list[j - 1])
+
+    def run_capture(cmd):
+        """
+        Executa um comando localmente ou via SSH e retorna:
+        (returncode, stdout, stderr).
+        """
+        if remote_ssh is None:
+            result = sn_run_local_cmd(cmd)
+
+            out = result.stdout or ""
+            err = result.stderr or ""
+
+            if isinstance(out, bytes):
+                out = out.decode(errors="replace")
+
+            if isinstance(err, bytes):
+                err = err.decode(errors="replace")
+
+            return result.returncode, out, err
+
+        stdin, stdout, stderr = remote_ssh.exec_command(
+            cmd,
+            get_pty=False
+        )
+
+        rc = stdout.channel.recv_exit_status()
+        out = stdout.read().decode(errors="replace")
+        err = stderr.read().decode(errors="replace")
+
+        return rc, out, err
+
+    def network_connect_checked(
+        network,
+        container_id,
+        ip_addr,
+        attempts=3
+    ):
+        cmd = (
+            "docker network connect "
+            "--ip " + ip_addr + " " +
+            network + " " + container_id
+        )
+
+        route_subnet = str(
+            ipaddress.ip_network(
+                ip_addr + "/24",
+                strict=False
+            )
+        )
+
+        last_error = ""
+
+        def remove_conflicting_route():
+            show_cmd = (
+                "docker exec -i " + container_id +
+                " ip route show " + route_subnet
+            )
+
+            rc, out, err = run_capture(show_cmd)
+
+            existing = out.strip()
+
+            if existing:
+                print(
+                    f"[GSL] conflicting route in "
+                    f"{container_id}: {existing}"
+                )
+
+            del_cmd = (
+                "docker exec -i " + container_id +
+                " ip route del " + route_subnet
+            )
+
+            rc, out, err = run_capture(del_cmd)
+
+            if rc != 0:
+                message = (err or out).strip()
+
+                print(
+                    f"[GSL] route removal result: "
+                    f"{message}"
+                )
+            else:
+                print(
+                    f"[GSL] removed conflicting "
+                    f"{route_subnet} route from "
+                    f"{container_id}"
+                )
+
+        for attempt in range(1, attempts + 1):
+            rc, out, err = run_capture(cmd)
+
+            if rc == 0:
+                print(
+                    f"[GSL] connected {container_id} "
+                    f"to {network} as {ip_addr}"
+                )
+                return
+
+            error = (err or out).strip()
+
+            if "already exists" in error.lower():
+                print(
+                    f"[GSL] endpoint already present: "
+                    f"{container_id} -> {network}"
+                )
+                return
+
+            last_error = error
+
+            print(
+                f"[GSL] network connect failed "
+                f"(attempt {attempt}/{attempts}): "
+                f"{last_error}"
+            )
+
+            if "conflicts with existing route" in error.lower():
+                print(
+                    f"[GSL] removing conflicting "
+                    f"{route_subnet} route before retry"
+                )
+
+                remove_conflicting_route()
+
+            time.sleep(0.5)
+
+        raise RuntimeError(
+            "docker network connect failed: "
+            f"network={network}, "
+            f"container={container_id}, "
+            f"ip={ip_addr}: {last_error}"
+        )
+
+    def wait_for_iface(container_id, ip_addr, timeout=30):
+        """
+        Aguarda até que o endereço IPv4 apareça dentro do
+        namespace do container e retorna o nome da interface.
+        """
+        deadline = time.time() + timeout
+        last_output = ""
+
+        cmd = (
+            "docker exec -i " + container_id +
+            " ip -4 -o addr show"
+        )
+
+        while time.time() < deadline:
+            rc, out, err = run_capture(cmd)
+
+            if rc == 0:
+                last_output = out
+
+                for line in out.splitlines():
+                    fields = line.split()
+
+                    if len(fields) < 4:
+                        continue
+
+                    if fields[2] != "inet":
+                        continue
+
+                    current_ip = fields[3].split("/")[0]
+
+                    if current_ip == ip_addr:
+                        iface = fields[1].split("@")[0]
+
+                        print(
+                            f"[GSL] found {ip_addr} on "
+                            f"{container_id}:{iface}"
+                        )
+
+                        return iface
+            else:
+                last_output = (err or out).strip()
+
+            time.sleep(0.25)
+
+        raise RuntimeError(
+            f"Timed out waiting for interface with IP "
+            f"{ip_addr} in {container_id}. "
+            f"Last output: {last_output}"
+        )
+
+    def run_or_raise(cmd, description):
+        rc, out, err = run_capture(cmd)
+
+        if rc != 0:
+            message = (err or out).strip()
+
+            raise RuntimeError(
+                f"{description} failed: {message}"
+            )
+
+    def configure_iface(
+        container_id,
+        current_iface,
+        target_iface
+    ):
+        if current_iface != target_iface:
+            run_or_raise(
+                "docker exec -i " + container_id +
+                " ip link set dev " + current_iface +
+                " down",
+                "interface down"
+            )
+
+            run_or_raise(
+                "docker exec -i " + container_id +
+                " ip link set dev " + current_iface +
+                " name " + target_iface,
+                "interface rename"
+            )
+
+        run_or_raise(
+            "docker exec -i " + container_id +
+            " ip link set dev " + target_iface +
+            " up",
+            "interface up"
+        )
+
+        run_or_raise(
+            "docker exec -i " + container_id +
+            " tc qdisc replace dev " + target_iface +
+            " root netem delay " + delay +
+            "ms loss " + str(loss) +
+            "% rate " + str(bw) + "Gbit",
+            "tc configuration"
+        )
+
+    # Create the new GSL Docker network.
+    create_cmd = (
+        "docker network create "
+        + GSL_name +
+        " --subnet " + subnet
+    )
+
+    rc, out, err = run_capture(create_cmd)
+
+    if rc != 0:
+        error = (err or out).strip()
+
+        if "already exists" not in error.lower():
+            raise RuntimeError(
+                "docker network create failed: "
+                + error
+            )
+
+    print(
+        "[Create GSL:]"
+        + create_cmd
+    )
+
+    # Satellite side.
+    network_connect_checked(
+        GSL_name,
+        sat_container,
+        sat_ip
+    )
+
+    sat_iface = wait_for_iface(
+        sat_container,
+        sat_ip
+    )
+
+    sat_target = (
+        "B" + str(i) +
+        "-eth" + str(j)
+    )
+
+    configure_iface(
+        sat_container,
+        sat_iface,
+        sat_target
+    )
+
+    print(
+        "[Add current node:]"
+        "docker network connect "
+        + GSL_name + " "
+        + sat_container +
+        " --ip " + sat_ip
+    )
+
+    # Ground-station side.
+    network_connect_checked(
+        GSL_name,
+        gs_container,
+        gs_ip
+    )
+
+    gs_iface = wait_for_iface(
+        gs_container,
+        gs_ip
+    )
+
+    gs_target = (
+        "B" + str(j) +
+        "-eth" + str(i)
+    )
+
+    configure_iface(
+        gs_container,
+        gs_iface,
+        gs_target
+    )
+
+    print(
+        "[Add right node:]"
+        "docker network connect "
+        + GSL_name + " "
+        + gs_container +
+        " --ip " + gs_ip
+    )
 
 
 def sn_del_link(first_index, second_index, container_id_list, remote_ssh):

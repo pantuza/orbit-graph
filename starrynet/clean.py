@@ -1,28 +1,36 @@
 #!/usr/bin/python
 # -*- coding: UTF-8 -*-
 """
-Starrynet Cleanup
-author: Yangtao Deng (dengyt21@mails.tsinghua.edu.cn)
+StarryNet Cleanup
 """
+
 import os
 
 
+ORBITGRAPH_NETWORK_PREFIXES = ("La_", "Le_", "GSL_", "GS_")
+
+
 def cleanup():
-    print("Deleting all native bridges and containers...")
-    #os.system("FOR /f \"tokens=*\" %i IN ('docker ps -q') DO docker stop %i")
-    os.system("docker service rm constellation-test")
-    with os.popen(
-            "docker rm -f $(docker ps | grep \"lwsen/starlab_node:1.0\" | awk '{ print $1 }')"
-    ) as f:
-        f.readlines()
-    with os.popen("docker network ls") as f:
+    print("Deleting OrbitGraph bridges and containers...")
+
+    # Remove somente containers pertencentes ao OrbitGraph.
+    os.system(
+        "docker rm -f $(docker ps -aq --filter name=ovs_container) "
+        "2>/dev/null; true"
+    )
+
+    # Remove somente redes pertencentes ao OrbitGraph.
+    with os.popen("docker network ls --format '{{.Name}}'") as f:
         all_br_info = f.readlines()
+
         for line in all_br_info:
-            if "La" in line or "Le" or "GS" in line:
-                network_name = line.split()[1]
-                print('docker network rm ' + network_name)
-                os.system('docker network rm ' + network_name)
+            network_name = line.strip()
+
+            if network_name.startswith(ORBITGRAPH_NETWORK_PREFIXES):
+                print("docker network rm " + network_name)
+                os.system("docker network rm " + network_name)
 
 
 if __name__ == "__main__":
     cleanup()
+    
